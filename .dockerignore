@@ -1,0 +1,30 @@
+# OCI build context (e.g. `podman build` / `docker build` — same file name)
+# Dependencies (rebuilt in image)
+node_modules/
+
+# Runtime secrets and Steam session (mount volume at /app/steam-data)
+.env
+.env.*
+!.env.example
+steam-data/
+
+# VCS
+.git/
+.gitignore
+
+# Logs and caches
+*.log
+coverage/
+.eslintcache
+*.tsbuildinfo
+.npm
+.cache
+
+# Docs (not needed to run the bot)
+docs/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
