@@ -2,11 +2,12 @@
   "compilerOptions": {
     "types": ["node"],
     "lib": ["ESNext"],
-    "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
     "allowJs": true,
     "moduleResolution": "bundler",
+    "target": "ES2023",
+    "esModuleInterop": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "noEmit": true,
@@ -22,6 +23,6 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "generated/**/*.ts", "prisma.config.ts"],
   "exclude": ["node_modules"]
 }

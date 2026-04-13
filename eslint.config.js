@@ -3,7 +3,7 @@ import tsparser from '@typescript-eslint/parser';
 
 export default [
   {
-    files: ['src/**/*.ts'],
+    files: ['src/**/*.ts', 'prisma.config.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -21,6 +21,6 @@ export default [
     }
   },
   {
-    ignores: ['node_modules/', 'steam-data/']
+    ignores: ['node_modules/', 'steam-data/', 'generated/']
   }
 ];

@@ -11,7 +11,24 @@ This document is a **roadmap**: it orders implementation work and defines a test
 Before starting, ensure you have:
 
 - **Runtime:** Node.js 20+ and pnpm (or the package manager you commit to the repo).
-- **Database:** PostgreSQL reachable from the Steam bot and (for integration tests) from your machine.
+- **Database:** MySQL reachable from the Steam bot and (for integration tests) from your machine (shared with SourceMod; see spec).
+
+  **Local testing:** You can run MySQL in a container with **[Podman](https://podman.io/)** (or Docker-equivalent commands) so migrations and manual SQL checks do not depend on a shared server. Example (adjust names, passwords, and image tag to taste):
+
+  ```bash
+  podman run -d --replace --name vidya-mysql \
+    -e MYSQL_ROOT_PASSWORD=devroot \
+    -e MYSQL_DATABASE=vidya \
+    -e MYSQL_USER=vidya \
+    -e MYSQL_PASSWORD=vidya \
+    -p 3306:3306 \
+    docker.io/mysql:8.4
+  ```
+
+  Then point `DATABASE_URL` at that instance, e.g. `mysql://vidya:vidya@127.0.0.1:3306/vidya`. Stop/remove the container when finished.
+
+  **Hosted / production:** A long-lived MySQL instance (same schema) can replace the local container later—e.g. a managed or self-hosted database you provide—without changing the application model; only `DATABASE_URL` (and network access from the bot and game server) changes.
+
 - **Steam:** A dedicated bot account; at least one **non-admin** Steam account to act as a giveaway winner; at least one **admin** SteamID64 listed in `BOT_ADMINS` for deposit/withdraw tests.
 - **Items:** Tradable TF2 items on the bot inventory for trade and `/inventory` tests.
 - **Game server (later phases):** A SourceMod server with `sm-giveaways` and the bridge plugin for P10 end-to-end tests.
@@ -86,11 +103,11 @@ flowchart LR
 **Deliverables:**
 
 - Migration(s) or SQL scripts creating `pending_deliveries` per [spec §6](./steam-giveaway-bot-spec.md).
-- Document the chosen tool (Prisma, Drizzle, Kysely, raw `pg`, etc.) in the repo README or `docs/`.
+- Document the chosen tool (Prisma, Drizzle, Kysely, raw `mysql2`, etc.) in the repo README or `docs/`.
 
 **How to test / Definition of Done:**
 
-- Migrations apply cleanly against an empty database.
+- Migrations apply cleanly against an empty database (local MySQL via Podman is enough; see **Prerequisites**).
 - Manual `INSERT` and `SELECT` confirm columns, types, and allowed `status` values (`pending`, `offer_sent`, `delivered`, `cancelled`).
 
 **Depends on:** P0.
@@ -255,7 +272,7 @@ flowchart LR
 
 **How to test / Definition of Done:**
 
-- On a test server: run `sm_gstart` flow, end giveaway with a winner; row appears in PostgreSQL; chat announcement fires.
+- On a test server: run `sm_gstart` flow, end giveaway with a winner; row appears in MySQL; chat announcement fires.
 
 **Depends on:** P3 (HTTP stable). Full E2E ideally after **P7–P9**.
 

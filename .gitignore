@@ -73,6 +73,9 @@ web_modules/
 .env.*
 !.env.example
 
+# Local overrides for scripts/podman-mysql.ps1
+scripts/podman-mysql.env
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache

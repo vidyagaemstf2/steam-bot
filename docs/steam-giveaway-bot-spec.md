@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-A TypeScript Steam bot that integrates with the `sm-giveaways` SourceMod plugin via a bridge SM plugin (`giveaways_bot.sp`) and a shared database. The bot's responsibilities are purely Steam-side: managing its inventory, detecting pending deliveries when players add it, and sending trade offers automatically.
+A TypeScript Steam bot that integrates with the `sm-giveaways` SourceMod plugin via a bridge SM plugin (`giveaways_bot.sp`) and a shared **MySQL** database. SourceMod’s database drivers are geared toward MySQL (and SQLite), not PostgreSQL, so the bridge plugin and the bot must use the same MySQL instance and schema. The bot's responsibilities are purely Steam-side: managing its inventory, detecting pending deliveries when players add it, and sending trade offers automatically.
 
 ---
 
@@ -81,7 +81,7 @@ This is the only forward that matters for the bot integration.
 
 ### 4.3 Database Access
 
-The plugin writes directly to the shared database using SourceMod's SQL natives, configured via the `giveaways_bot` entry in `databases.cfg`.
+The plugin writes directly to the shared **MySQL** database using SourceMod's SQL natives, configured via the `giveaways_bot` entry in `databases.cfg` (MySQL driver / connection string as required by your server setup).
 
 ---
 
@@ -110,6 +110,8 @@ Returns the bot's current tradable TF2 inventory, excluding items already associ
 ---
 
 ## 6. Database Schema
+
+The persistence layer is **MySQL** so both SourceMod and the TypeScript bot can use identical DDL and types.
 
 ### `pending_deliveries`
 
@@ -174,17 +176,17 @@ On startup, the bot should:
 
 The Steam bot loads all settings from **environment variables** (e.g. a **`.env` file in local development**, loaded via `node --env-file=.env` or similar — the real `.env` must stay **gitignored**). Production uses the same variable names set in the host or platform (Railway, VPS, etc.). **Do not commit secrets.** The implementation should validate required variables at startup (e.g. with Zod).
 
-| Variable                       | Required | Description                                                                                       |
-| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------- |
-| `STEAM_ACCOUNT_NAME`           | yes      | Bot Steam login                                                                                   |
-| `STEAM_PASSWORD`               | yes      | Bot Steam password                                                                                |
-| `STEAM_SHARED_SECRET`          | yes      | Steam Guard shared secret (e.g. from `.maFile`)                                                   |
-| `STEAM_IDENTITY_SECRET`        | yes      | Mobile confirmations secret (trade confirmations)                                                 |
-| `DATABASE_URL`                 | yes      | PostgreSQL connection URL                                                                         |
-| `API_PORT`                     | no       | Port for the internal HTTP API (default e.g. `3000`)                                              |
-| `API_SECRET`                   | yes      | Shared secret for `X-Bot-Secret` (must match the bridge plugin)                                   |
-| `BOT_ADMINS`                   | yes      | Comma-separated SteamID64 list; those users get unconditional incoming trade acceptance           |
-| `REMOVE_FRIEND_AFTER_DELIVERY` | no       | `true` / `false` — whether to remove the winner from the friends list after a successful delivery |
+| Variable                       | Required | Description                                                                                                                                                                                                                                    |
+| ------------------------------ | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STEAM_ACCOUNT_NAME`           | yes      | Bot Steam login                                                                                                                                                                                                                                |
+| `STEAM_PASSWORD`               | yes      | Bot Steam password                                                                                                                                                                                                                             |
+| `STEAM_SHARED_SECRET`          | yes      | Steam Guard shared secret (e.g. from `.maFile`)                                                                                                                                                                                                |
+| `STEAM_IDENTITY_SECRET`        | yes      | Mobile confirmations secret (trade confirmations)                                                                                                                                                                                              |
+| `DATABASE_URL`                 | yes      | MySQL connection URL (e.g. `mysql://user:pass@host:3306/dbname` for Prisma). For local development you can point this at a throwaway MySQL instance (e.g. Podman as in the phased development plan); for production, use your real MySQL host. |
+| `API_PORT`                     | no       | Port for the internal HTTP API (default e.g. `3000`)                                                                                                                                                                                           |
+| `API_SECRET`                   | yes      | Shared secret for `X-Bot-Secret` (must match the bridge plugin)                                                                                                                                                                                |
+| `BOT_ADMINS`                   | yes      | Comma-separated SteamID64 list; those users get unconditional incoming trade acceptance                                                                                                                                                        |
+| `REMOVE_FRIEND_AFTER_DELIVERY` | no       | `true` / `false` — whether to remove the winner from the friends list after a successful delivery                                                                                                                                              |
 
 Example `.env.example` (committed; no real secrets):
 
@@ -193,7 +195,7 @@ STEAM_ACCOUNT_NAME=
 STEAM_PASSWORD=
 STEAM_SHARED_SECRET=
 STEAM_IDENTITY_SECRET=
-DATABASE_URL=postgresql://user:pass@host:5432/dbname
+DATABASE_URL=mysql://user:pass@host:3306/dbname
 API_PORT=3000
 API_SECRET=shared-secret-with-sm-plugin
 BOT_ADMINS=76561198000000000
