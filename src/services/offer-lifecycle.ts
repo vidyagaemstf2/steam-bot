@@ -3,6 +3,7 @@ import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js'
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
   findRowsByTradeOfferId,
+  listOfferSentRows,
   listOfferSentRowsForWinner,
   markDeliveredByTradeOfferId,
   resetOfferSentToPendingByTradeOfferId
@@ -34,7 +35,11 @@ function cancelOffer(offer: TradeOffer): Promise<void> {
   });
 }
 
-async function handleSentOfferChanged(ctx: SteamContext, offer: TradeOffer): Promise<void> {
+/**
+ * Applies DB transitions for an outbound offer we track, given Steam's current state.
+ * Used by sentOfferChanged and startup reconciliation (spec §9).
+ */
+async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeOffer): Promise<void> {
   if (!offer.isOurOffer || offer.id === null || offer.id === undefined) {
     return;
   }
@@ -91,6 +96,10 @@ async function handleSentOfferChanged(ctx: SteamContext, offer: TradeOffer): Pro
   }
 }
 
+async function handleSentOfferChanged(ctx: SteamContext, offer: TradeOffer): Promise<void> {
+  await applyOutboundOfferStateFromSteam(ctx, offer);
+}
+
 async function handlePartnerUnfriended(ctx: SteamContext, partnerId64: string): Promise<void> {
   const rows = await listOfferSentRowsForWinner(partnerId64);
   if (rows.length === 0) {
@@ -134,6 +143,46 @@ async function handlePartnerUnfriended(ctx: SteamContext, partnerId64: string): 
       console.error(`[offer-lifecycle] reset after unfriend for ${tradeOfferId}:`, err);
     }
   }
+}
+
+/**
+ * Spec §9: after Steam session is ready, align `offer_sent` rows with Steam's view of each offer.
+ */
+export async function reconcileOfferSentOnStartup(ctx: SteamContext): Promise<void> {
+  const rows = await listOfferSentRows();
+  const missingId = rows.filter((r) => r.trade_offer_id === null || r.trade_offer_id.length === 0);
+  if (missingId.length > 0) {
+    console.warn(
+      `[reconcile] ${String(missingId.length)} offer_sent row(s) missing trade_offer_id; skipping those`
+    );
+  }
+
+  const ids = [
+    ...new Set(
+      rows.map((r) => r.trade_offer_id).filter((x): x is string => x !== null && x.length > 0)
+    )
+  ];
+
+  console.log(
+    `[reconcile] Startup: ${String(rows.length)} offer_sent row(s), ${String(ids.length)} unique trade_offer_id(s)`
+  );
+
+  for (const tradeOfferId of ids) {
+    try {
+      const offer = await getOffer(ctx.tradeOfferManager, tradeOfferId);
+      console.log(
+        `[reconcile] trade_offer_id=${tradeOfferId} state=${String(offer.state)} isOurOffer=${String(offer.isOurOffer)}`
+      );
+      await applyOutboundOfferStateFromSteam(ctx, offer);
+    } catch (err) {
+      console.error(
+        `[reconcile] getOffer failed for trade_offer_id=${tradeOfferId}; leaving DB unchanged:`,
+        err
+      );
+    }
+  }
+
+  console.log('[reconcile] Startup reconciliation finished.');
 }
 
 let offerLifecycleRegistered = false;

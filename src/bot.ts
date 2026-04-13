@@ -3,7 +3,10 @@ import { prisma } from '@/db.ts';
 import { env } from '@/env.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
 import { registerFriendGating } from '@/services/friends.ts';
-import { registerOfferLifecycle } from '@/services/offer-lifecycle.ts';
+import {
+  reconcileOfferSentOnStartup,
+  registerOfferLifecycle
+} from '@/services/offer-lifecycle.ts';
 import { registerIncomingTradePolicy } from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
 
@@ -36,6 +39,7 @@ export function startBot(): void {
 
       const steamCtx = await connectSteam();
       console.log('[bot] Steam session ready.');
+      await reconcileOfferSentOnStartup(steamCtx);
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
       registerOfferLifecycle(steamCtx);
