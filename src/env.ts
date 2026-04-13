@@ -11,6 +11,9 @@ export const env = createEnv({
     STEAM_IDENTITY_SECRET: z.string().min(1, 'STEAM_IDENTITY_SECRET is required'),
     DATABASE_URL: z.string().url('DATABASE_URL must be a valid URL'),
     API_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    /** Listen address (`0.0.0.0` = all interfaces; use `127.0.0.1` for local-only). */
+    API_HOST: z.string().min(1).default('0.0.0.0'),
+    /** API key: send as `X-Bot-Secret` or `Authorization: Bearer <API_SECRET>`. */
     API_SECRET: z.string().min(1, 'API_SECRET is required'),
     BOT_ADMINS: z
       .string()

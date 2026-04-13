@@ -85,15 +85,17 @@ The plugin writes directly to the shared **MySQL** database using SourceMod's SQ
 
 ---
 
-## 5. Steam Bot HTTP API (Internal)
+## 5. Steam Bot HTTP API
 
-The bot exposes a minimal HTTP server **only** so `giveaways_bot.sp` can query available inventory before a giveaway starts. It should be bound to localhost or a private network interface only.
+The bot exposes a minimal HTTP server so `giveaways_bot.sp` (or other callers) can query available inventory before a giveaway starts.
+
+**Binding:** Listen address is set with `API_HOST` (default `0.0.0.0`, all interfaces). For development you may use `127.0.0.1`. For a public URL, terminate **TLS** at a reverse proxy or edge (nginx, Caddy, Cloudflare, Railway, etc.) and forward to this process; the Node server speaks plain HTTP.
 
 ### `GET /inventory`
 
 Returns the bot's current tradable TF2 inventory, excluding items already associated with a `pending` or `offer_sent` delivery record.
 
-**Auth:** Shared secret header — `X-Bot-Secret: <value>`, set in both the bot's environment and the bridge plugin's config.
+**Auth:** API key in `API_SECRET`. Send it as header **`X-Bot-Secret: <API_SECRET>`** (required for the SourceMod bridge), or **`Authorization: Bearer <API_SECRET>`** (same value). Use a long, random secret; rate limiting is not part of the minimal API.
 
 **Response:**
 
@@ -183,8 +185,9 @@ The Steam bot loads all settings from **environment variables** (e.g. a **`.env`
 | `STEAM_SHARED_SECRET`          | yes      | Steam Guard shared secret (e.g. from `.maFile`)                                                                                                                                                                                                |
 | `STEAM_IDENTITY_SECRET`        | yes      | Mobile confirmations secret (trade confirmations)                                                                                                                                                                                              |
 | `DATABASE_URL`                 | yes      | MySQL connection URL (e.g. `mysql://user:pass@host:3306/dbname` for Prisma). For local development you can point this at a throwaway MySQL instance (e.g. Podman as in the phased development plan); for production, use your real MySQL host. |
-| `API_PORT`                     | no       | Port for the internal HTTP API (default e.g. `3000`)                                                                                                                                                                                           |
-| `API_SECRET`                   | yes      | Shared secret for `X-Bot-Secret` (must match the bridge plugin)                                                                                                                                                                                |
+| `API_PORT`                     | no       | Port for the HTTP API (default e.g. `3000`)                                                                                                                                                                                                    |
+| `API_HOST`                     | no       | Host to bind (default `0.0.0.0` = all interfaces; use `127.0.0.1` for local-only)                                                                                                                                                               |
+| `API_SECRET`                   | yes      | API key for `GET /inventory`: `X-Bot-Secret` or `Authorization: Bearer` (must match the bridge plugin)                                                                                                                                            |
 | `BOT_ADMINS`                   | yes      | Comma-separated SteamID64 list; those users get unconditional incoming trade acceptance                                                                                                                                                        |
 | `REMOVE_FRIEND_AFTER_DELIVERY` | no       | `true` / `false` — whether to remove the winner from the friends list after a successful delivery                                                                                                                                              |
 
@@ -197,6 +200,7 @@ STEAM_SHARED_SECRET=
 STEAM_IDENTITY_SECRET=
 DATABASE_URL=mysql://user:pass@host:3306/dbname
 API_PORT=3000
+API_HOST=0.0.0.0
 API_SECRET=shared-secret-with-sm-plugin
 BOT_ADMINS=76561198000000000
 REMOVE_FRIEND_AFTER_DELIVERY=true

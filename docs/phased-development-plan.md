@@ -133,14 +133,14 @@ flowchart LR
 
 ---
 
-### P3 — Internal HTTP: `GET /inventory`
+### P3 — HTTP: `GET /inventory`
 
-**Goal:** Expose the minimal API the bridge plugin needs, bound for local/private use only.
+**Goal:** Expose the minimal API the bridge plugin needs, with a configurable bind address (default all interfaces for public reachability; use TLS at a reverse proxy when exposed to the internet).
 
 **Deliverables:**
 
-- HTTP server on `API_PORT` (default from spec), binding to loopback or a configurable host suitable for “internal only.”
-- Auth: reject requests without valid `X-Bot-Secret` ([spec §5](./steam-giveaway-bot-spec.md)).
+- HTTP server on `API_PORT` and `API_HOST` (default from spec).
+- Auth: reject requests without a valid API key (`X-Bot-Secret` or `Authorization: Bearer`, same value as `API_SECRET`; [spec §5](./steam-giveaway-bot-spec.md)).
 - Load TF2 tradable inventory via the same stack as trade offers (`steam-tradeoffer-manager` / `steamcommunity`).
 - Exclude any `asset_id` that appears in `pending_deliveries` with status `pending` or `offer_sent` ([spec §5](./steam-giveaway-bot-spec.md)).
 - JSON response shape: `assetId`, `name`, `imageUrl` per spec.

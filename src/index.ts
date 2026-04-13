@@ -1,9 +1,11 @@
+import { stopApiServer } from '@/api/server.ts';
 import { setupErrorHandlers } from '@/utils/error-handler.ts';
 import { prisma, shutdownSteam, startBot } from '@/bot.ts';
 
-setupErrorHandlers(() => {
+setupErrorHandlers(async () => {
+  await stopApiServer();
   shutdownSteam();
-  void prisma.$disconnect();
+  await prisma.$disconnect();
 });
 
 console.log('[index] Starting Steam bot...');

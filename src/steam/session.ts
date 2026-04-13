@@ -7,7 +7,9 @@ import SteamTotp from 'steam-totp';
 import { env } from '@/env.ts';
 
 /** Team Fortress 2 — used for `gamesPlayed` so inventory/trade views match TF2 context. */
-const TF2_APP_ID = 440;
+export const TF2_APP_ID = 440;
+/** TF2 backpack inventory context (Mann Co. inventory). */
+export const TF2_CONTEXT_ID = 2;
 
 export type SteamContext = {
   user: SteamUser;

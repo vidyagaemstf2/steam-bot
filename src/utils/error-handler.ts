@@ -1,4 +1,11 @@
-type ShutdownCallback = () => void;
+type ShutdownCallback = () => void | Promise<void>;
+
+async function runShutdown(onShutdown?: ShutdownCallback): Promise<void> {
+  if (!onShutdown) {
+    return;
+  }
+  await Promise.resolve(onShutdown());
+}
 
 export function setupErrorHandlers(onShutdown?: ShutdownCallback): void {
   process.on('unhandledRejection', (reason) => {
@@ -11,19 +18,25 @@ export function setupErrorHandlers(onShutdown?: ShutdownCallback): void {
 
   process.on('uncaughtException', (error) => {
     console.error('[error-handler] Uncaught Exception:', error.message, error.stack);
-    onShutdown?.();
-    process.exit(1);
+    void (async () => {
+      await runShutdown(onShutdown);
+      process.exit(1);
+    })();
   });
 
   process.on('SIGINT', () => {
     console.log('[error-handler] Received SIGINT. Shutting down...');
-    onShutdown?.();
-    process.exit(0);
+    void (async () => {
+      await runShutdown(onShutdown);
+      process.exit(0);
+    })();
   });
 
   process.on('SIGTERM', () => {
     console.log('[error-handler] Received SIGTERM. Shutting down...');
-    onShutdown?.();
-    process.exit(0);
+    void (async () => {
+      await runShutdown(onShutdown);
+      process.exit(0);
+    })();
   });
 }
