@@ -84,3 +84,18 @@ export async function findRowsByTradeOfferId(tradeOfferId: string): Promise<Pend
     where: { trade_offer_id: tradeOfferId }
   });
 }
+
+export async function createPendingDelivery(
+  winnerSteamId: string,
+  assetId: string,
+  itemName: string
+): Promise<PendingDelivery> {
+  return prisma.pendingDelivery.create({
+    data: {
+      winner_steam_id: winnerSteamId,
+      asset_id: assetId,
+      item_name: itemName,
+      status: 'pending'
+    }
+  });
+}

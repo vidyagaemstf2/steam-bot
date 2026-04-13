@@ -3,7 +3,7 @@ import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import SteamUser from 'steam-user';
-import { listReservedAssetIds } from '@/db/pending-deliveries.ts';
+import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
 import type { SteamContext } from '@/steam/session.ts';
@@ -214,6 +214,54 @@ async function handleDeliveryTrigger(
   sendJson(res, 202, { ok: true, queued: true });
 }
 
+async function handleDeliveryRecord(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Invalid body' });
+    return;
+  }
+  if (body === null || typeof body !== 'object') {
+    sendJson(res, 400, { error: 'Invalid body' });
+    return;
+  }
+
+  const { steamId64, assetId, itemName } = body as Record<string, unknown>;
+
+  if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
+    sendJson(res, 400, { error: 'Invalid steamId64' });
+    return;
+  }
+  if (typeof assetId !== 'string' || assetId.trim().length === 0) {
+    sendJson(res, 400, { error: 'Invalid assetId' });
+    return;
+  }
+  if (typeof itemName !== 'string' || itemName.trim().length === 0) {
+    sendJson(res, 400, { error: 'Invalid itemName' });
+    return;
+  }
+
+  try {
+    await createPendingDelivery(steamId64, assetId.trim(), itemName.trim());
+  } catch (err) {
+    console.error('[api] Failed to record delivery:', err);
+    sendJson(res, 500, { error: 'Failed to record delivery' });
+    return;
+  }
+
+  const isFriend = ctx.user.myFriends[steamId64] === SteamUser.EFriendRelationship.Friend;
+  if (isFriend) {
+    triggerPrizeDelivery(ctx, steamId64);
+  }
+
+  sendJson(res, 201, { recorded: true, isFriend, deliveryQueued: isFriend });
+}
+
 async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const pathname = url.pathname;
@@ -238,6 +286,11 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
 
   if (req.method === 'POST' && pathname === '/delivery/trigger') {
     await handleDeliveryTrigger(ctx, req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/delivery/record') {
+    await handleDeliveryRecord(ctx, req, res);
     return;
   }
 
@@ -274,7 +327,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       });
       apiServer = server;
       console.log(
-        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger`
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record`
       );
       resolve();
     });
