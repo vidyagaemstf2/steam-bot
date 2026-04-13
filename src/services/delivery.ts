@@ -28,6 +28,10 @@ function sendOffer(offer: TradeOffer): Promise<'pending' | 'sent'> {
 
 const deliveringPartners = new Set<string>();
 
+function normalizeDbAssetId(raw: string): string {
+  return raw.trim().replace(/^"+|"+$/g, '');
+}
+
 async function attemptDeliverPrizes(ctx: SteamContext, partnerId64: string): Promise<void> {
   const rows = await listPendingRowsForWinner(partnerId64);
   if (rows.length === 0) {
@@ -52,7 +56,7 @@ async function attemptDeliverPrizes(ctx: SteamContext, partnerId64: string): Pro
     }
   }
 
-  const uniqueAssetIds = [...new Set(rows.map((r) => r.asset_id.trim()))];
+  const uniqueAssetIds = [...new Set(rows.map((r) => normalizeDbAssetId(r.asset_id)))];
   const missing: string[] = [];
   const itemsToAttach: OfferItem[] = [];
 

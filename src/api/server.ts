@@ -1,8 +1,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import SteamUser from 'steam-user';
 import { listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
+import { triggerPrizeDelivery } from '@/services/delivery.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
@@ -53,6 +55,40 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
     'Content-Length': Buffer.byteLength(payload, 'utf8')
   });
   res.end(payload);
+}
+
+const STEAM_ID64_RE = /^\d{17,19}$/;
+
+function isValidSteamId64(s: string): boolean {
+  return STEAM_ID64_RE.test(s);
+}
+
+function readJsonBody(req: IncomingMessage, maxBytes = 65536): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(new Error('Body too large'));
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      if (raw.length === 0) {
+        resolve(null);
+        return;
+      }
+      try {
+        resolve(JSON.parse(raw) as unknown);
+      } catch {
+        reject(new Error('Invalid JSON'));
+      }
+    });
+    req.on('error', reject);
+  });
 }
 
 function mapItem(item: EconItem): InventoryItemJson | null {
@@ -113,17 +149,42 @@ async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<
   sendJson(res, 200, out);
 }
 
-async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  if (req.method !== 'GET') {
-    sendJson(res, 404, { error: 'Not found' });
+function handleFriendStatus(ctx: SteamContext, res: ServerResponse, steamId64: string): void {
+  if (!isValidSteamId64(steamId64)) {
+    sendJson(res, 400, { error: 'Invalid steamId64' });
     return;
   }
+  const isFriend = ctx.user.myFriends[steamId64] === SteamUser.EFriendRelationship.Friend;
+  sendJson(res, 200, { isFriend });
+}
 
-  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
-  if (pathname !== '/inventory') {
-    sendJson(res, 404, { error: 'Not found' });
+async function handleDeliveryTrigger(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Invalid body' });
     return;
   }
+  if (body === null || typeof body !== 'object' || !('steamId64' in body)) {
+    sendJson(res, 400, { error: 'Missing steamId64' });
+    return;
+  }
+  const steamId64 = (body as { steamId64?: unknown }).steamId64;
+  if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
+    sendJson(res, 400, { error: 'Invalid steamId64' });
+    return;
+  }
+  triggerPrizeDelivery(ctx, steamId64);
+  sendJson(res, 202, { ok: true, queued: true });
+}
+
+async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
 
   const provided = getProvidedApiKey(req);
   if (provided === null || !apiKeysEqual(provided, env.API_SECRET)) {
@@ -131,7 +192,23 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
     return;
   }
 
-  await handleInventory(ctx, res);
+  if (req.method === 'GET' && pathname === '/inventory') {
+    await handleInventory(ctx, res);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname.startsWith('/friend-status/')) {
+    const steamId64 = pathname.slice('/friend-status/'.length);
+    handleFriendStatus(ctx, res, steamId64);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/delivery/trigger') {
+    await handleDeliveryTrigger(ctx, req, res);
+    return;
+  }
+
+  sendJson(res, 404, { error: 'Not found' });
 }
 
 /**
@@ -163,7 +240,9 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
         console.error('[api] HTTP server error:', err.message);
       });
       apiServer = server;
-      console.log(`[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)}`);
+      console.log(
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger`
+      );
       resolve();
     });
   });
