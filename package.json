@@ -8,13 +8,14 @@
   "scripts": {
     "start": "node --import tsx/esm src/index.ts",
     "dev": "node --env-file=.env --import tsx/esm src/index.ts",
-    "lint": "eslint src/ prisma.config.ts",
+    "lint": "eslint src/ scripts/ prisma.config.ts",
     "format": "prettier --write .",
     "typecheck": "tsc --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma generate && prisma migrate dev",
     "db:migrate:deploy": "prisma generate && prisma migrate deploy",
     "db:studio": "prisma studio",
+    "db:smoke": "node --env-file=.env --import tsx/esm scripts/db-smoke.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {

@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { prisma } from '@/db.ts';
+import { listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
@@ -97,11 +97,8 @@ async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<
 
   let reserved: Set<string>;
   try {
-    const rows = await prisma.pendingDelivery.findMany({
-      where: { status: { in: ['pending', 'offer_sent'] } },
-      select: { asset_id: true }
-    });
-    reserved = new Set(rows.map((r) => r.asset_id));
+    const ids = await listReservedAssetIds();
+    reserved = new Set(ids);
   } catch (err) {
     console.error('[api] Database error loading reserved assets:', err);
     sendJson(res, 502, { error: 'Bad gateway' });

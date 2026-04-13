@@ -3,7 +3,7 @@ import tsparser from '@typescript-eslint/parser';
 
 export default [
   {
-    files: ['src/**/*.ts', 'prisma.config.ts'],
+    files: ['src/**/*.ts', 'scripts/**/*.ts', 'prisma.config.ts'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
