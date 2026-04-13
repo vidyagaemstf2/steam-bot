@@ -1,6 +1,7 @@
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import { isBotAdmin } from '@/env.ts';
+import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
 
 function acceptOffer(offer: TradeOffer): Promise<string> {
@@ -25,48 +26,6 @@ function declineOffer(offer: TradeOffer): Promise<void> {
       }
     });
   });
-}
-
-function confirmObjectOnce(
-  community: SteamContext['community'],
-  identitySecret: string,
-  offerId: string
-): Promise<void> {
-  return new Promise((resolve, reject) => {
-    community.acceptConfirmationForObject(identitySecret, offerId, (err: Error | null) => {
-      if (err) {
-        reject(err);
-      } else {
-        resolve();
-      }
-    });
-  });
-}
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function confirmObject(
-  community: SteamContext['community'],
-  identitySecret: string,
-  offerId: string,
-  retries = 3,
-  delayMs = 3000
-): Promise<void> {
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      await confirmObjectOnce(community, identitySecret, offerId);
-      return;
-    } catch (err) {
-      if (attempt < retries) {
-        console.log(
-          `[trades] Confirmation attempt ${String(attempt)}/${String(retries)} failed for ${offerId}, retrying in ${String(delayMs / 1000)}s...`
-        );
-        await sleep(delayMs);
-      } else {
-        throw err;
-      }
-    }
-  }
 }
 
 export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext): Promise<void> {
@@ -107,7 +66,9 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
     }
     const idStr = String(idForConfirm);
     try {
-      await confirmObject(ctx.community, ctx.identitySecret, idStr);
+      await confirmTradeOfferWithRetries(ctx.community, ctx.identitySecret, idStr, {
+        logPrefix: '[trades]'
+      });
       console.log(`[trades] Offer ${idStr} confirmed via STEAM_IDENTITY_SECRET`);
     } catch (err) {
       console.error(`[trades] Failed to confirm offer ${idStr}:`, err);
