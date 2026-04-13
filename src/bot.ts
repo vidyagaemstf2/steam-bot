@@ -1,6 +1,7 @@
 import { startApiServer } from '@/api/server.ts';
 import { prisma } from '@/db.ts';
 import { env } from '@/env.ts';
+import { registerFriendGating } from '@/services/friends.ts';
 import { registerIncomingTradePolicy } from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
 
@@ -19,7 +20,7 @@ function redactedDatabaseUrl(raw: string): string {
 
 /**
  * Entry point for runtime wiring (mirrors `login()` in the reference steam-bot).
- * Attaches HTTP API and incoming trade policy after the Steam session is ready.
+ * Attaches HTTP API, incoming trade policy, and friend gating after Steam is ready.
  */
 export function startBot(): void {
   void (async () => {
@@ -33,6 +34,7 @@ export function startBot(): void {
 
       const steamCtx = await connectSteam();
       console.log('[bot] Steam session ready.');
+      registerFriendGating(steamCtx);
       registerIncomingTradePolicy(steamCtx);
       await startApiServer(steamCtx);
     } catch (err) {
