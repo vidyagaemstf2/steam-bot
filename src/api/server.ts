@@ -1,6 +1,7 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { gzipSync } from 'node:zlib';
 import SteamUser from 'steam-user';
 import { listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
@@ -11,7 +12,8 @@ import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 export type InventoryItemJson = {
   assetId: string;
   name: string;
-  imageUrl: string;
+  /** Omitted when `GET /inventory?minimal=1` (smaller JSON for fragile HTTP/2 clients). */
+  imageUrl?: string;
 };
 
 type EconItem = {
@@ -48,13 +50,33 @@ function getProvidedApiKey(req: IncomingMessage): string | null {
   return null;
 }
 
-function sendJson(res: ServerResponse, status: number, body: unknown): void {
+function sendJson(
+  res: ServerResponse,
+  status: number,
+  body: unknown,
+  req?: IncomingMessage
+): void {
   const payload = JSON.stringify(body);
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Content-Length': Buffer.byteLength(payload, 'utf8')
-  });
-  res.end(payload);
+  const acceptsGzip =
+    req !== undefined &&
+    /\bgzip\b/.test(req.headers['accept-encoding']?.toString() ?? '');
+
+  if (acceptsGzip) {
+    const compressed = gzipSync(Buffer.from(payload, 'utf8'));
+    res.writeHead(status, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Encoding': 'gzip',
+      'Content-Length': compressed.length,
+      Vary: 'Accept-Encoding'
+    });
+    res.end(compressed);
+  } else {
+    res.writeHead(status, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Length': Buffer.byteLength(payload, 'utf8')
+    });
+    res.end(payload);
+  }
 }
 
 const STEAM_ID64_RE = /^\d{17,19}$/;
@@ -104,7 +126,12 @@ function mapItem(item: EconItem): InventoryItemJson | null {
   };
 }
 
-async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<void> {
+async function handleInventory(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  minimal: boolean
+): Promise<void> {
   const sid = ctx.user.steamID;
   if (!sid) {
     console.error('[api] Steam user has no steamID yet.');
@@ -142,11 +169,15 @@ async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<
     }
     const mapped = mapItem(item);
     if (mapped) {
-      out.push(mapped);
+      if (minimal) {
+        out.push({ assetId: mapped.assetId, name: mapped.name });
+      } else {
+        out.push(mapped);
+      }
     }
   }
 
-  sendJson(res, 200, out);
+  sendJson(res, 200, out, req);
 }
 
 function handleFriendStatus(ctx: SteamContext, res: ServerResponse, steamId64: string): void {
@@ -184,7 +215,8 @@ async function handleDeliveryTrigger(
 }
 
 async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
+  const url = new URL(req.url ?? '/', 'http://localhost');
+  const pathname = url.pathname;
 
   const provided = getProvidedApiKey(req);
   if (provided === null || !apiKeysEqual(provided, env.API_SECRET)) {
@@ -193,7 +225,8 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
   }
 
   if (req.method === 'GET' && pathname === '/inventory') {
-    await handleInventory(ctx, res);
+    const minimal = url.searchParams.get('minimal') === '1';
+    await handleInventory(ctx, req, res, minimal);
     return;
   }
 
