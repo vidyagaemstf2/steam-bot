@@ -3,25 +3,13 @@ import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js'
 import { listPendingRowsForWinner, markRowsOfferSent } from '@/db/pending-deliveries.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
+import { loadTf2InventoryViaOfferManager } from '@/steam/tf2-inventory.ts';
 
 type OfferItem = Parameters<TradeOffer['addMyItem']>[0];
 
-function loadBotTf2Inventory(manager: SteamContext['tradeOfferManager']): Promise<OfferItem[]> {
-  return new Promise((resolve, reject) => {
-    manager.getInventoryContents(
-      TF2_APP_ID,
-      TF2_CONTEXT_ID,
-      true,
-      (err, inventory, _currencies) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(inventory ?? []);
-        }
-      }
-    );
-  });
+async function loadBotTf2Inventory(manager: SteamContext['tradeOfferManager']): Promise<OfferItem[]> {
+  const merged = await loadTf2InventoryViaOfferManager(manager);
+  return merged as OfferItem[];
 }
 
 function sendOffer(offer: TradeOffer): Promise<'pending' | 'sent'> {
@@ -58,13 +46,13 @@ async function attemptDeliverPrizes(ctx: SteamContext, partnerId64: string): Pro
 
   const byAsset = new Map<string, OfferItem>();
   for (const item of inventory) {
-    const id = String(item.assetid ?? item.id);
+    const id = String(item.assetid ?? item.id).trim();
     if (id.length > 0) {
       byAsset.set(id, item);
     }
   }
 
-  const uniqueAssetIds = [...new Set(rows.map((r) => r.asset_id))];
+  const uniqueAssetIds = [...new Set(rows.map((r) => r.asset_id.trim()))];
   const missing: string[] = [];
   const itemsToAttach: OfferItem[] = [];
 
@@ -137,6 +125,27 @@ async function attemptDeliverPrizes(ctx: SteamContext, partnerId64: string): Pro
   }
 }
 
+/**
+ * Queues the same outbound prize flow as on friend add (mutex per winner).
+ * Use when a user asks to retry (e.g. chat `!claim`) or from tests.
+ */
+export function triggerPrizeDelivery(ctx: SteamContext, partnerId64: string): void {
+  void (async () => {
+    if (deliveringPartners.has(partnerId64)) {
+      console.log(`[delivery] Skip concurrent delivery for ${partnerId64}`);
+      return;
+    }
+    deliveringPartners.add(partnerId64);
+    try {
+      await attemptDeliverPrizes(ctx, partnerId64);
+    } catch (err) {
+      console.error(`[delivery] Unexpected error for ${partnerId64}:`, err);
+    } finally {
+      deliveringPartners.delete(partnerId64);
+    }
+  })();
+}
+
 let outboundDeliveryRegistered = false;
 
 /**
@@ -155,20 +164,6 @@ export function registerOutboundDelivery(ctx: SteamContext): void {
     }
 
     const partnerId64 = steamId.getSteamID64();
-
-    void (async () => {
-      if (deliveringPartners.has(partnerId64)) {
-        console.log(`[delivery] Skip concurrent delivery for ${partnerId64}`);
-        return;
-      }
-      deliveringPartners.add(partnerId64);
-      try {
-        await attemptDeliverPrizes(ctx, partnerId64);
-      } catch (err) {
-        console.error(`[delivery] Unexpected error for ${partnerId64}:`, err);
-      } finally {
-        deliveringPartners.delete(partnerId64);
-      }
-    })();
+    triggerPrizeDelivery(ctx, partnerId64);
   });
 }

@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
+import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
 export type InventoryItemJson = {
   assetId: string;
@@ -55,25 +55,6 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.end(payload);
 }
 
-function loadTf2Inventory(community: SteamContext['community'], steamId64: string): Promise<EconItem[]> {
-  return new Promise((resolve, reject) => {
-    community.getUserInventoryContents(
-      steamId64,
-      TF2_APP_ID,
-      TF2_CONTEXT_ID,
-      true,
-      'english',
-      (err: Error | null, inventory?: EconItem[]) => {
-        if (err) {
-          reject(err);
-          return;
-        }
-        resolve(inventory ?? []);
-      }
-    );
-  });
-}
-
 function mapItem(item: EconItem): InventoryItemJson | null {
   const assetId = item.assetid ?? item.id;
   if (assetId === undefined || assetId === null) {
@@ -81,7 +62,7 @@ function mapItem(item: EconItem): InventoryItemJson | null {
   }
   const name = item.market_name ?? item.name ?? '';
   return {
-    assetId: String(assetId),
+    assetId: String(assetId).trim(),
     name,
     imageUrl: item.getImageURL()
   };
@@ -107,7 +88,10 @@ async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<
 
   let items: EconItem[];
   try {
-    items = await loadTf2Inventory(ctx.community, sid.getSteamID64());
+    items = (await loadTf2InventoryViaCommunity(
+      ctx.community,
+      sid.getSteamID64()
+    )) as EconItem[];
   } catch (err) {
     console.error('[api] Steam inventory error:', err);
     sendJson(res, 502, { error: 'Bad gateway' });
@@ -116,7 +100,7 @@ async function handleInventory(ctx: SteamContext, res: ServerResponse): Promise<
 
   const out: InventoryItemJson[] = [];
   for (const item of items) {
-    const assetId = String(item.assetid ?? item.id ?? '');
+    const assetId = String(item.assetid ?? item.id ?? '').trim();
     if (!assetId || reserved.has(assetId)) {
       continue;
     }

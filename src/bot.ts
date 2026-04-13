@@ -1,6 +1,7 @@
 import { startApiServer } from '@/api/server.ts';
 import { prisma } from '@/db.ts';
 import { env } from '@/env.ts';
+import { registerClaimChat } from '@/services/claim-chat.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
 import { registerFriendGating } from '@/services/friends.ts';
 import {
@@ -42,6 +43,7 @@ export function startBot(): void {
       await reconcileOfferSentOnStartup(steamCtx);
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
+      registerClaimChat(steamCtx);
       registerOfferLifecycle(steamCtx);
       registerIncomingTradePolicy(steamCtx);
       await startApiServer(steamCtx);
