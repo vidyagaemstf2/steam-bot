@@ -37,6 +37,14 @@ export async function listOfferSentRows(): Promise<PendingDelivery[]> {
   });
 }
 
+export async function listOfferSentRowsForWinner(
+  winnerSteamId: string
+): Promise<PendingDelivery[]> {
+  return prisma.pendingDelivery.findMany({
+    where: { winner_steam_id: winnerSteamId, status: 'offer_sent' }
+  });
+}
+
 export async function markRowsOfferSent(ids: number[], tradeOfferId: string): Promise<void> {
   if (ids.length === 0) {
     return;
