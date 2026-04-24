@@ -2,6 +2,10 @@ import { createEnv } from '@t3-oss/env-core';
 import { z } from 'zod';
 
 const steamId64 = z.string().regex(/^[0-9]{17}$/, 'Expected SteamID64 (17 digits)');
+const runtimeEnv = {
+  ...process.env,
+  API_PORT: process.env.API_PORT ?? process.env.PORT
+};
 
 export const env = createEnv({
   server: {
@@ -31,7 +35,7 @@ export const env = createEnv({
       .default('true')
       .transform((v) => v === 'true')
   },
-  runtimeEnv: process.env,
+  runtimeEnv,
   emptyStringAsUndefined: true
 });
 

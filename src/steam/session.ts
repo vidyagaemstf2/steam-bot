@@ -1,3 +1,4 @@
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import SteamCommunity from 'steamcommunity';
@@ -20,6 +21,17 @@ export type SteamContext = {
 };
 
 let context: SteamContext | null = null;
+const RELOGIN_ERRORS = new Set(['LoggedInElsewhere', 'LogonSessionReplaced']);
+const RELOGIN_BASE_DELAY_MS = 15_000;
+const RELOGIN_MAX_ATTEMPTS = 5;
+const SESSION_CONFLICT_RETRY_MS = 2 * 60 * 1000;
+const HEALTH_CHECK_INTERVAL_MS = 60_000;
+
+let reloginAttempts = 0;
+let reloginTimer: ReturnType<typeof setTimeout> | null = null;
+let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+let inSessionConflict = false;
+let isShuttingDown = false;
 
 export function getSteamContext(): SteamContext | null {
   return context;
@@ -29,7 +41,80 @@ function projectRootDir(): string {
   return join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 }
 
+function clearReloginTimer(): void {
+  if (reloginTimer) {
+    clearTimeout(reloginTimer);
+    reloginTimer = null;
+  }
+}
+
+function clearHealthCheckTimer(): void {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
+}
+
+function logOn(user: SteamUser): void {
+  user.logOn({
+    accountName: env.STEAM_ACCOUNT_NAME,
+    password: env.STEAM_PASSWORD,
+    twoFactorCode: SteamTotp.generateAuthCode(env.STEAM_SHARED_SECRET)
+  });
+}
+
+function scheduleRelogin(user: SteamUser, sessionConflict = false): void {
+  if (isShuttingDown || reloginTimer) {
+    return;
+  }
+
+  if (!sessionConflict) {
+    if (reloginAttempts >= RELOGIN_MAX_ATTEMPTS) {
+      console.error(`[steam] Exceeded ${String(RELOGIN_MAX_ATTEMPTS)} re-login attempts; exiting.`);
+      process.exit(1);
+    }
+    reloginAttempts++;
+  }
+
+  const delay = sessionConflict
+    ? SESSION_CONFLICT_RETRY_MS
+    : RELOGIN_BASE_DELAY_MS * Math.pow(2, reloginAttempts - 1);
+
+  if (sessionConflict) {
+    console.warn(`[steam] Session conflict; retrying in ${String(delay / 1000)}s.`);
+  } else {
+    console.warn(
+      `[steam] Scheduling re-login attempt ${String(reloginAttempts)}/${String(RELOGIN_MAX_ATTEMPTS)} in ${String(delay / 1000)}s.`
+    );
+  }
+
+  reloginTimer = setTimeout(() => {
+    reloginTimer = null;
+    try {
+      logOn(user);
+    } catch (err) {
+      console.error('[steam] logOn failed:', err);
+      scheduleRelogin(user);
+    }
+  }, delay);
+}
+
+function startHealthCheck(user: SteamUser): void {
+  clearHealthCheckTimer();
+
+  healthCheckTimer = setInterval(() => {
+    if (!user.steamID) {
+      console.warn('[steam] Health check failed: not logged in; triggering re-login.');
+      scheduleRelogin(user);
+    }
+  }, HEALTH_CHECK_INTERVAL_MS);
+}
+
 export function shutdownSteam(): void {
+  isShuttingDown = true;
+  clearReloginTimer();
+  clearHealthCheckTimer();
+
   const ctx = context;
   if (!ctx) {
     return;
@@ -39,6 +124,7 @@ export function shutdownSteam(): void {
   } catch (err) {
     console.error('[steam] logOff failed:', err);
   }
+  context = null;
 }
 
 /**
@@ -51,6 +137,7 @@ export async function connectSteam(): Promise<SteamContext> {
   }
 
   const dataDirectory = join(projectRootDir(), 'steam-data');
+  mkdirSync(dataDirectory, { recursive: true });
 
   const user = new SteamUser({
     dataDirectory,
@@ -62,7 +149,8 @@ export async function connectSteam(): Promise<SteamContext> {
     steam: user,
     community,
     domain: 'vidya-steam-bot.local',
-    language: 'en'
+    language: 'en',
+    pollInterval: 30000
   });
 
   const identitySecret = env.STEAM_IDENTITY_SECRET;
@@ -77,18 +165,18 @@ export async function connectSteam(): Promise<SteamContext> {
   return await new Promise<SteamContext>((resolve, reject) => {
     let sessionReady = false;
 
-    const onStartupError = (err: Error): void => {
-      if (!sessionReady) {
-        reject(err);
-      } else {
-        console.error('[steam] SteamUser error:', err.message);
-      }
-    };
-
-    user.once('error', onStartupError);
-
     user.on('loggedOn', () => {
       console.log('[steam] Logged on to Steam.');
+      const recovered = inSessionConflict || reloginAttempts > 0;
+
+      reloginAttempts = 0;
+      inSessionConflict = false;
+      clearReloginTimer();
+
+      if (recovered) {
+        console.log('[steam] Re-login successful.');
+      }
+
       user.setPersona(SteamUser.EPersonaState.Online);
       user.gamesPlayed([TF2_APP_ID]);
     });
@@ -98,8 +186,26 @@ export async function connectSteam(): Promise<SteamContext> {
     });
 
     user.on('error', (err) => {
-      if (sessionReady) {
-        console.error('[steam] SteamUser error:', err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[steam] SteamUser error:', message);
+
+      if (RELOGIN_ERRORS.has(message)) {
+        inSessionConflict = true;
+        scheduleRelogin(user, true);
+        return;
+      }
+
+      if (!sessionReady || !user.steamID) {
+        scheduleRelogin(user);
+      }
+    });
+
+    community.on('sessionExpired', () => {
+      console.warn('[steam] Web session expired; requesting a new web session.');
+      try {
+        user.webLogOn();
+      } catch (err) {
+        console.error('[steam] webLogOn failed:', err);
       }
     });
 
@@ -109,7 +215,6 @@ export async function connectSteam(): Promise<SteamContext> {
         if (err) {
           console.error('[steam] TradeOfferManager.setCookies failed:', err.message);
           if (!sessionReady) {
-            user.off('error', onStartupError);
             reject(err);
           }
           return;
@@ -117,8 +222,8 @@ export async function connectSteam(): Promise<SteamContext> {
 
         if (!sessionReady) {
           sessionReady = true;
-          user.off('error', onStartupError);
           console.log('[steam] TradeOfferManager ready (webSession cookies applied).');
+          startHealthCheck(user);
           resolve(context!);
         } else {
           console.log('[steam] Web session refreshed; cookies updated.');
@@ -126,10 +231,6 @@ export async function connectSteam(): Promise<SteamContext> {
       });
     });
 
-    user.logOn({
-      accountName: env.STEAM_ACCOUNT_NAME,
-      password: env.STEAM_PASSWORD,
-      twoFactorCode: SteamTotp.generateAuthCode(env.STEAM_SHARED_SECRET)
-    });
+    logOn(user);
   });
 }

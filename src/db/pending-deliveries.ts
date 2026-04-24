@@ -3,6 +3,31 @@ import type { PendingDelivery } from '../../generated/prisma/client.ts';
 
 const RESERVED_STATUSES = ['pending', 'offer_sent'] as const;
 
+function activeReservationKey(winnerSteamId: string, assetId: string): string {
+  return `${winnerSteamId}:${assetId}`;
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') {
+    return false;
+  }
+  return (err as { code?: unknown }).code === 'P2002';
+}
+
+async function findActiveDeliveryForAsset(
+  winnerSteamId: string,
+  assetId: string
+): Promise<PendingDelivery | null> {
+  return prisma.pendingDelivery.findFirst({
+    where: {
+      winner_steam_id: winnerSteamId,
+      asset_id: assetId,
+      status: { in: [...RESERVED_STATUSES] }
+    },
+    orderBy: { id: 'asc' }
+  });
+}
+
 /**
  * Asset IDs currently tied to an undelivered delivery (inventory must not list these).
  */
@@ -49,16 +74,28 @@ export async function markRowsOfferSent(ids: number[], tradeOfferId: string): Pr
   if (ids.length === 0) {
     return;
   }
-  await prisma.pendingDelivery.updateMany({
+  const rows = await prisma.pendingDelivery.findMany({
     where: { id: { in: ids } },
-    data: { status: 'offer_sent', trade_offer_id: tradeOfferId }
+    select: { id: true, winner_steam_id: true, asset_id: true }
   });
+  await prisma.$transaction(
+    rows.map((row) =>
+      prisma.pendingDelivery.update({
+        where: { id: row.id },
+        data: {
+          status: 'offer_sent',
+          trade_offer_id: tradeOfferId,
+          active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
+        }
+      })
+    )
+  );
 }
 
 export async function markDeliveredByTradeOfferId(tradeOfferId: string): Promise<void> {
   await prisma.pendingDelivery.updateMany({
     where: { trade_offer_id: tradeOfferId, status: 'offer_sent' },
-    data: { status: 'delivered', delivered_at: new Date() }
+    data: { status: 'delivered', delivered_at: new Date(), active_reservation_key: null }
   });
 }
 
@@ -66,17 +103,43 @@ export async function resetOfferSentToPending(ids: number[]): Promise<void> {
   if (ids.length === 0) {
     return;
   }
-  await prisma.pendingDelivery.updateMany({
+  const rows = await prisma.pendingDelivery.findMany({
     where: { id: { in: ids }, status: 'offer_sent' },
-    data: { status: 'pending', trade_offer_id: null, delivered_at: null }
+    select: { id: true, winner_steam_id: true, asset_id: true }
   });
+  await prisma.$transaction(
+    rows.map((row) =>
+      prisma.pendingDelivery.update({
+        where: { id: row.id },
+        data: {
+          status: 'pending',
+          trade_offer_id: null,
+          delivered_at: null,
+          active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
+        }
+      })
+    )
+  );
 }
 
 export async function resetOfferSentToPendingByTradeOfferId(tradeOfferId: string): Promise<void> {
-  await prisma.pendingDelivery.updateMany({
+  const rows = await prisma.pendingDelivery.findMany({
     where: { trade_offer_id: tradeOfferId, status: 'offer_sent' },
-    data: { status: 'pending', trade_offer_id: null, delivered_at: null }
+    select: { id: true, winner_steam_id: true, asset_id: true }
   });
+  await prisma.$transaction(
+    rows.map((row) =>
+      prisma.pendingDelivery.update({
+        where: { id: row.id },
+        data: {
+          status: 'pending',
+          trade_offer_id: null,
+          delivered_at: null,
+          active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
+        }
+      })
+    )
+  );
 }
 
 export async function findRowsByTradeOfferId(tradeOfferId: string): Promise<PendingDelivery[]> {
@@ -90,12 +153,29 @@ export async function createPendingDelivery(
   assetId: string,
   itemName: string
 ): Promise<PendingDelivery> {
-  return prisma.pendingDelivery.create({
-    data: {
-      winner_steam_id: winnerSteamId,
-      asset_id: assetId,
-      item_name: itemName,
-      status: 'pending'
+  const normalizedAssetId = assetId.trim();
+  const existing = await findActiveDeliveryForAsset(winnerSteamId, normalizedAssetId);
+  if (existing) {
+    return existing;
+  }
+
+  try {
+    return await prisma.pendingDelivery.create({
+      data: {
+        winner_steam_id: winnerSteamId,
+        asset_id: normalizedAssetId,
+        active_reservation_key: activeReservationKey(winnerSteamId, normalizedAssetId),
+        item_name: itemName,
+        status: 'pending'
+      }
+    });
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      const winnerDelivery = await findActiveDeliveryForAsset(winnerSteamId, normalizedAssetId);
+      if (winnerDelivery) {
+        return winnerDelivery;
+      }
     }
-  });
+    throw err;
+  }
 }

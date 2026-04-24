@@ -5,6 +5,7 @@
 import { prisma } from '@/db.ts';
 import {
   countPendingForWinner,
+  createPendingDelivery,
   findRowsByTradeOfferId,
   hasPendingForWinner,
   listOfferSentRows,
@@ -28,16 +29,14 @@ async function main(): Promise<void> {
   await countPendingForWinner(TEST_WINNER);
 
   const assetId = `smoke_asset_${String(runId)}`;
-  const row = await prisma.pendingDelivery.create({
-    data: {
-      winner_steam_id: TEST_WINNER,
-      asset_id: assetId,
-      item_name: 'db-smoke test item',
-      status: 'pending'
-    }
-  });
+  const row = await createPendingDelivery(TEST_WINNER, assetId, 'db-smoke test item');
   const id = row.id;
   console.log('[db-smoke] Created test row id=', id);
+
+  const duplicate = await createPendingDelivery(TEST_WINNER, assetId, 'db-smoke duplicate item');
+  if (duplicate.id !== id) {
+    throw new Error('createPendingDelivery expected existing active row');
+  }
 
   if (!(await hasPendingForWinner(TEST_WINNER))) {
     throw new Error('hasPendingForWinner expected true');

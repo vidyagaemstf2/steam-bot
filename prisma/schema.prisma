@@ -15,14 +15,15 @@ enum DeliveryStatus {
 }
 
 model PendingDelivery {
-  id              Int            @id @default(autoincrement())
-  winner_steam_id String         @db.VarChar(32)
-  asset_id        String         @db.VarChar(256)
-  item_name       String         @db.VarChar(512)
-  status          DeliveryStatus
-  created_at      DateTime       @default(now())
-  delivered_at    DateTime?
-  trade_offer_id  String?        @db.VarChar(64)
+  id                     Int            @id @default(autoincrement())
+  winner_steam_id        String         @db.VarChar(32)
+  asset_id               String         @db.VarChar(256)
+  active_reservation_key String?        @unique @db.VarChar(320)
+  item_name              String         @db.VarChar(512)
+  status                 DeliveryStatus
+  created_at             DateTime       @default(now())
+  delivered_at           DateTime?
+  trade_offer_id         String?        @db.VarChar(64)
 
   @@index([winner_steam_id, status])
   @@map("pending_deliveries")
