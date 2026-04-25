@@ -256,12 +256,13 @@ export async function tryRecordIncomingDonationOffer(
 ): Promise<boolean> {
   const donorSteamId = offer.partner.getSteamID64();
   const message = offerMessage(offer);
-  const activeSession = await findActiveDonationSession(donorSteamId);
-  const hasDonationIntent = includesDonationCommand(message) || activeSession !== null;
+  const hasDonationIntent = includesDonationCommand(message);
 
   if (!hasDonationIntent) {
     return false;
   }
+
+  const activeSession = await findActiveDonationSession(donorSteamId);
 
   const offerId = offer.id;
   if (offerId === null || offerId === undefined) {

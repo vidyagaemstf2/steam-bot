@@ -1,5 +1,6 @@
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
 import TradeOfferManager from 'steam-tradeoffer-manager';
+import { markDonationRejectedByPolicy } from '@/db/donations.ts';
 import { isBotAdmin } from '@/env.ts';
 import { tryRecordIncomingDonationOffer } from '@/services/donations.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
@@ -31,7 +32,7 @@ function declineOffer(offer: TradeOffer): Promise<void> {
 
 export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext): Promise<void> {
   const steamId = offer.partner.getSteamID64();
-  const offerId = offer.id ?? 'unknown';
+  const offerId = String(offer.id ?? 'unknown');
 
   console.log(`[trades] Incoming offer ${offerId} from ${steamId}`);
 
@@ -41,6 +42,15 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
       await declineOffer(offer);
     } catch (err) {
       console.error(`[trades] Failed to decline offer ${offerId}:`, err);
+      return;
+    }
+
+    if (offerId !== 'unknown') {
+      try {
+        await markDonationRejectedByPolicy(offerId, reason);
+      } catch (err) {
+        console.error(`[trades] Failed to mark declined offer ${offerId} in DB:`, err);
+      }
     }
   };
 

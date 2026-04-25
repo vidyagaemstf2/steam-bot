@@ -221,6 +221,20 @@ export async function markDonationRejected(
   });
 }
 
+export async function markDonationRejectedByPolicy(
+  tradeOfferId: string,
+  reason: string
+): Promise<void> {
+  await prisma.donationOffer.updateMany({
+    where: { trade_offer_id: tradeOfferId, status: 'pending_review' },
+    data: {
+      status: 'rejected',
+      review_note: reason,
+      reviewed_at: new Date()
+    }
+  });
+}
+
 export async function markDonationApproved(
   offer: PendingDonationOffer,
   reviewer: DonationReviewerInput,
