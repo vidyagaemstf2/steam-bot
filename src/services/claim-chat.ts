@@ -10,7 +10,7 @@ function isFriend(ctx: SteamContext, id64: string): boolean {
 }
 
 /**
- * Lets winners type `!claim` in Steam chat to re-run pending delivery (same logic as on friend add).
+ * Lets winners retry pending delivery from Steam chat (same logic as on friend add).
  */
 export function registerClaimChat(ctx: SteamContext): void {
   if (claimChatRegistered) {
@@ -25,7 +25,7 @@ export function registerClaimChat(ctx: SteamContext): void {
 
     const raw = (msg.message_no_bbcode ?? msg.message).trim();
     const firstToken = raw.split(/\s+/)[0]?.toLowerCase() ?? '';
-    if (firstToken !== '!claim') {
+    if (firstToken !== '!claim' && firstToken !== '!reclamar') {
       return;
     }
 
@@ -39,7 +39,7 @@ export function registerClaimChat(ctx: SteamContext): void {
 
       if (!isFriend(ctx, id64)) {
         await send(
-          'Add me as a Steam friend first, then use !claim again so I can send your giveaway prize.'
+          'Agregame como amigo en Steam primero. Despues usa !reclamar o !claim otra vez para que pueda mandarte tu premio.'
         );
         return;
       }
@@ -47,13 +47,13 @@ export function registerClaimChat(ctx: SteamContext): void {
       const hasPending = await hasPendingForWinner(id64);
       if (!hasPending) {
         await send(
-          'You have no pending giveaway prize on file. Win a giveaway on the server first — then add me and use !claim if a trade is not sent automatically.'
+          'No tenes ningun premio pendiente registrado. Primero gana un sorteo en el server; despues agregame y usa !reclamar si la oferta no llega automaticamente.'
         );
         return;
       }
 
       await send(
-        'Checking your pending delivery now. If your items are in my inventory, I will send a trade offer in a moment.'
+        'Estoy revisando tu entrega pendiente. Si los items estan en mi inventario, te mando una oferta en un momento.'
       );
       triggerPrizeDelivery(ctx, id64);
     })().catch((err: unknown) => {

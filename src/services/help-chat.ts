@@ -3,18 +3,18 @@ import type { SteamContext } from '@/steam/session.ts';
 let helpChatRegistered = false;
 
 const HELP_MESSAGE = [
-  'Steam giveaway bot commands:',
+  'Comandos del bot de sorteos de Steam:',
   '',
-  '!help - Show this message.',
-  '!claim - Retry delivery for a giveaway prize you already won. Add me as a friend first.',
-  '!donate - Open a 15 minute donation window. Send a trade offer containing only donated TF2 items and include !donate in the trade message.',
+  '!ayuda / !help - Muestra este mensaje.',
+  '!reclamar / !claim - Reintenta la entrega de un premio que ya ganaste. Primero agregame como amigo.',
+  '!donar / !donate - Abre una ventana de donacion de 15 minutos. Mandame una oferta con solo items de TF2 para donar e inclui !donar o !donate en el mensaje de la oferta.',
   '',
-  'Donation review:',
-  'Non-admin donation offers are not accepted automatically. They wait for server admins to approve or reject them.',
-  'Admins can review pending donations in-game with sm_gdonations.',
+  'Revision de donaciones:',
+  'Las ofertas de donacion de jugadores no admins no se aceptan automaticamente. Quedan esperando que un admin las apruebe o rechace.',
+  'Los admins pueden revisar donaciones pendientes en el server con sm_donaciones, sm_gdonaciones o sm_gdonations.',
   '',
-  'Giveaway prizes:',
-  'Approved donated items can appear in the giveaway prize inventory and may show donor attribution in-game.'
+  'Premios de sorteos:',
+  'Los items donados y aprobados pueden aparecer en el inventario de premios y mostrar quien los dono dentro del juego.'
 ].join('\n');
 
 export function registerHelpChat(ctx: SteamContext): void {
@@ -30,7 +30,7 @@ export function registerHelpChat(ctx: SteamContext): void {
 
     const raw = (msg.message_no_bbcode ?? msg.message).trim();
     const firstToken = raw.split(/\s+/)[0]?.toLowerCase() ?? '';
-    if (firstToken !== '!help') {
+    if (firstToken !== '!help' && firstToken !== '!ayuda') {
       return;
     }
 

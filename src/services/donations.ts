@@ -33,7 +33,7 @@ type SteamIdLike = {
   getSteamID64: () => string;
 };
 
-const DONATION_COMMAND = '!donate';
+const DONATION_COMMANDS = new Set(['!donate', '!donar']);
 let donationChatRegistered = false;
 
 export type DonationSessionView = {
@@ -47,7 +47,10 @@ function secondsUntil(date: Date): number {
 }
 
 function includesDonationCommand(message: string | null): boolean {
-  return (message ?? '').toLowerCase().split(/\s+/).includes(DONATION_COMMAND);
+  return (message ?? '')
+    .toLowerCase()
+    .split(/\s+/)
+    .some((token) => DONATION_COMMANDS.has(token));
 }
 
 function offerMessage(offer: TradeOffer): string | null {
@@ -222,19 +225,19 @@ export async function tryRecordIncomingDonationOffer(offer: TradeOffer): Promise
 
   const offerId = offer.id;
   if (offerId === null || offerId === undefined) {
-    throw new Error('Donation offer has no trade offer id');
+    throw new Error('La oferta de donacion no tiene ID de oferta de intercambio');
   }
 
   if (offer.itemsToGive.length > 0) {
-    throw new Error('Donation offer asks for bot items');
+    throw new Error('La oferta de donacion pide items del bot');
   }
 
   const items = mapDonationItems(offer.itemsToReceive as unknown[]);
   if (items.length === 0) {
-    throw new Error('Donation offer has no usable received items');
+    throw new Error('La oferta de donacion no tiene items recibidos utilizables');
   }
   if (!allItemsAreTf2(items)) {
-    throw new Error('Donation offer includes non-TF2 inventory items');
+    throw new Error('La oferta de donacion incluye items que no son de TF2');
   }
 
   await recordDonationOffer({
@@ -255,7 +258,7 @@ export async function approveDonationOffer(
 ): Promise<void> {
   const pending = await findPendingDonationOffer(tradeOfferId);
   if (!pending) {
-    throw new Error('Donation offer is not pending review');
+    throw new Error('La oferta de donacion no esta pendiente de revision');
   }
 
   let offer: TradeOffer;
@@ -267,20 +270,20 @@ export async function approveDonationOffer(
   }
 
   if (offer.state !== TradeOfferManager.ETradeOfferState.Active) {
-    const reason = `Steam offer is not active (state=${String(offer.state)})`;
+    const reason = `La oferta de Steam no esta activa (estado=${String(offer.state)})`;
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
   }
 
   if (offer.itemsToGive.length > 0) {
-    const reason = 'Donation offer asks for bot items';
+    const reason = 'La oferta de donacion pide items del bot';
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
   }
 
   const items = mapDonationItems(offer.itemsToReceive as unknown[]);
   if (items.length === 0 || !allItemsAreTf2(items)) {
-    const reason = 'Donation offer has no acceptable TF2 items';
+    const reason = 'La oferta de donacion no tiene items de TF2 aceptables';
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
   }
@@ -304,7 +307,7 @@ export async function rejectDonationOffer(
 ): Promise<void> {
   const pending = await findPendingDonationOffer(tradeOfferId);
   if (!pending) {
-    throw new Error('Donation offer is not pending review');
+    throw new Error('La oferta de donacion no esta pendiente de revision');
   }
 
   try {
@@ -332,7 +335,7 @@ export function registerDonationChat(ctx: SteamContext): void {
 
     const raw = (msg.message_no_bbcode ?? msg.message).trim();
     const firstToken = raw.split(/\s+/)[0]?.toLowerCase() ?? '';
-    if (firstToken !== DONATION_COMMAND) {
+    if (!DONATION_COMMANDS.has(firstToken)) {
       return;
     }
 
@@ -342,11 +345,11 @@ export function registerDonationChat(ctx: SteamContext): void {
     void (async () => {
       const session = await createSteamDonationSession(donorSteamId, null);
       const prefix = session.created
-        ? 'Donation window opened for 15 minutes.'
-        : `You already have a donation window open for about ${String(session.expiresInSeconds)} more seconds.`;
+        ? 'Ventana de donacion abierta por 15 minutos.'
+        : `Ya tenes una ventana de donacion abierta por unos ${String(session.expiresInSeconds)} segundos mas.`;
       await ctx.user.chat.sendFriendMessage(
         donorSteamId,
-        `${prefix} Send me a trade offer containing only donated TF2 items, with !donate in the trade message. An admin will review it before I accept.`
+        `${prefix} Mandame una oferta con solo items de TF2 para donar, e inclui !donar o !donate en el mensaje de la oferta. Un admin la va a revisar antes de que yo la acepte.`
       );
     })().catch((err: unknown) => {
       console.error(`[donations] Error handling !donate from ${donorSteamId}:`, err);

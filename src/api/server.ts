@@ -143,7 +143,7 @@ async function handleInventory(
   const sid = ctx.user.steamID;
   if (!sid) {
     console.error('[api] Steam user has no steamID yet.');
-    sendJson(res, 503, { error: 'Service unavailable' });
+    sendJson(res, 503, { error: 'Servicio no disponible' });
     return;
   }
 
@@ -153,7 +153,7 @@ async function handleInventory(
     reserved = new Set(ids);
   } catch (err) {
     console.error('[api] Database error loading reserved assets:', err);
-    sendJson(res, 502, { error: 'Bad gateway' });
+    sendJson(res, 502, { error: 'Error comunicandose con la base de datos' });
     return;
   }
 
@@ -165,7 +165,7 @@ async function handleInventory(
     )) as EconItem[];
   } catch (err) {
     console.error('[api] Steam inventory error:', err);
-    sendJson(res, 502, { error: 'Bad gateway' });
+    sendJson(res, 502, { error: 'Error consultando el inventario de Steam' });
     return;
   }
 
@@ -206,7 +206,7 @@ async function handleInventory(
 
 function handleFriendStatus(ctx: SteamContext, res: ServerResponse, steamId64: string): void {
   if (!isValidSteamId64(steamId64)) {
-    sendJson(res, 400, { error: 'Invalid steamId64' });
+    sendJson(res, 400, { error: 'SteamID64 invalido' });
     return;
   }
   const isFriend = ctx.user.myFriends[steamId64] === SteamUser.EFriendRelationship.Friend;
@@ -222,16 +222,16 @@ async function handleDeliveryTrigger(
   try {
     body = await readJsonBody(req);
   } catch {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
   if (body === null || typeof body !== 'object' || !('steamId64' in body)) {
-    sendJson(res, 400, { error: 'Missing steamId64' });
+    sendJson(res, 400, { error: 'Falta steamId64' });
     return;
   }
   const steamId64 = (body as { steamId64?: unknown }).steamId64;
   if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
-    sendJson(res, 400, { error: 'Invalid steamId64' });
+    sendJson(res, 400, { error: 'SteamID64 invalido' });
     return;
   }
   triggerPrizeDelivery(ctx, steamId64);
@@ -247,26 +247,26 @@ async function handleDeliveryRecord(
   try {
     body = await readJsonBody(req);
   } catch {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
   if (body === null || typeof body !== 'object') {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
 
   const { steamId64, assetId, itemName } = body as Record<string, unknown>;
 
   if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
-    sendJson(res, 400, { error: 'Invalid steamId64' });
+    sendJson(res, 400, { error: 'SteamID64 invalido' });
     return;
   }
   if (typeof assetId !== 'string' || assetId.trim().length === 0) {
-    sendJson(res, 400, { error: 'Invalid assetId' });
+    sendJson(res, 400, { error: 'assetId invalido' });
     return;
   }
   if (typeof itemName !== 'string' || itemName.trim().length === 0) {
-    sendJson(res, 400, { error: 'Invalid itemName' });
+    sendJson(res, 400, { error: 'itemName invalido' });
     return;
   }
 
@@ -274,7 +274,7 @@ async function handleDeliveryRecord(
     await createPendingDelivery(steamId64, assetId.trim(), itemName.trim());
   } catch (err) {
     console.error('[api] Failed to record delivery:', err);
-    sendJson(res, 500, { error: 'Failed to record delivery' });
+    sendJson(res, 500, { error: 'No se pudo registrar la entrega' });
     return;
   }
 
@@ -291,17 +291,17 @@ async function handleDonationSession(req: IncomingMessage, res: ServerResponse):
   try {
     body = await readJsonBody(req);
   } catch {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
   if (body === null || typeof body !== 'object') {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
 
   const { steamId64, donorName } = body as Record<string, unknown>;
   if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
-    sendJson(res, 400, { error: 'Invalid steamId64' });
+    sendJson(res, 400, { error: 'SteamID64 invalido' });
     return;
   }
   const cleanDonorName = typeof donorName === 'string' && donorName.trim() ? donorName.trim() : null;
@@ -316,7 +316,7 @@ async function handleDonationSession(req: IncomingMessage, res: ServerResponse):
     });
   } catch (err) {
     console.error('[api] Failed to create donation session:', err);
-    sendJson(res, 500, { error: 'Failed to create donation session' });
+    sendJson(res, 500, { error: 'No se pudo crear la ventana de donacion' });
     return;
   }
 }
@@ -345,7 +345,7 @@ async function handlePendingDonations(res: ServerResponse, req: IncomingMessage)
     );
   } catch (err) {
     console.error('[api] Failed to list pending donations:', err);
-    sendJson(res, 500, { error: 'Failed to list pending donations' });
+    sendJson(res, 500, { error: 'No se pudieron listar las donaciones pendientes' });
   }
 }
 
@@ -360,7 +360,7 @@ async function handleDonationReview(
   try {
     body = await readJsonBody(req);
   } catch {
-    sendJson(res, 400, { error: 'Invalid body' });
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
     return;
   }
 
@@ -385,7 +385,7 @@ async function handleDonationReview(
     }
   } catch (err) {
     console.error(`[api] Donation ${approve ? 'approve' : 'reject'} failed:`, err);
-    sendJson(res, 409, { error: err instanceof Error ? err.message : 'Donation review failed' });
+    sendJson(res, 409, { error: err instanceof Error ? err.message : 'Fallo la revision de la donacion' });
   }
 }
 
@@ -395,7 +395,7 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
 
   const provided = getProvidedApiKey(req);
   if (provided === null || !apiKeysEqual(provided, env.API_SECRET)) {
-    sendJson(res, 401, { error: 'Unauthorized' });
+    sendJson(res, 401, { error: 'No autorizado' });
     return;
   }
 
@@ -435,14 +435,14 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
   if (req.method === 'POST' && donationReview) {
     const tradeOfferId = decodeURIComponent(donationReview[1] ?? '');
     if (!tradeOfferId) {
-      sendJson(res, 400, { error: 'Missing tradeOfferId' });
+      sendJson(res, 400, { error: 'Falta tradeOfferId' });
       return;
     }
     await handleDonationReview(ctx, req, res, tradeOfferId, donationReview[2] === 'approve');
     return;
   }
 
-  sendJson(res, 404, { error: 'Not found' });
+  sendJson(res, 404, { error: 'No encontrado' });
 }
 
 /**
@@ -458,7 +458,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       void handleRequest(ctx, req, res).catch((err: unknown) => {
         console.error('[api] Unhandled request error:', err);
         if (!res.writableEnded) {
-          sendJson(res, 500, { error: 'Internal server error' });
+          sendJson(res, 500, { error: 'Error interno del servidor' });
         }
       });
     });
