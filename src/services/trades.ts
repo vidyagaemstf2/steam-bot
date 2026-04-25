@@ -1,6 +1,7 @@
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import { isBotAdmin } from '@/env.ts';
+import { tryRecordIncomingDonationOffer } from '@/services/donations.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
 
@@ -44,7 +45,16 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
   };
 
   if (!isBotAdmin(steamId)) {
-    await decline('sender is not in BOT_ADMINS');
+    try {
+      const recordedDonation = await tryRecordIncomingDonationOffer(offer);
+      if (recordedDonation) {
+        console.log(`[trades] Donation offer ${offerId} from ${steamId} queued for admin review`);
+        return;
+      }
+      await decline('sender is not in BOT_ADMINS and offer is not marked as a donation');
+    } catch (err) {
+      await decline(err instanceof Error ? err.message : String(err));
+    }
     return;
   }
 

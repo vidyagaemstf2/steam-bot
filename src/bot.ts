@@ -3,6 +3,7 @@ import { prisma } from '@/db.ts';
 import { env } from '@/env.ts';
 import { registerClaimChat } from '@/services/claim-chat.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
+import { registerDonationChat } from '@/services/donations.ts';
 import { registerFriendGating } from '@/services/friends.ts';
 import {
   reconcileOfferSentOnStartup,
@@ -44,6 +45,7 @@ export function startBot(): void {
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
       registerClaimChat(steamCtx);
+      registerDonationChat(steamCtx);
       registerOfferLifecycle(steamCtx);
       registerIncomingTradePolicy(steamCtx);
       await startApiServer(steamCtx);

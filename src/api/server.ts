@@ -3,15 +3,23 @@ import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import SteamUser from 'steam-user';
+import { listPendingDonationOffers, listPrizePoolItemsByAssetIds } from '@/db/donations.ts';
 import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
+import {
+  approveDonationOffer,
+  createGameDonationSession,
+  rejectDonationOffer
+} from '@/services/donations.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
 export type InventoryItemJson = {
   assetId: string;
   name: string;
+  donorSteamId?: string;
+  donorName?: string;
   /** Omitted when `GET /inventory?minimal=1` (smaller JSON for fragile HTTP/2 clients). */
   imageUrl?: string;
 };
@@ -161,7 +169,7 @@ async function handleInventory(
     return;
   }
 
-  const out: InventoryItemJson[] = [];
+  const available: InventoryItemJson[] = [];
   for (const item of items) {
     const assetId = String(item.assetid ?? item.id ?? '').trim();
     if (!assetId || reserved.has(assetId)) {
@@ -170,14 +178,30 @@ async function handleInventory(
     const mapped = mapItem(item);
     if (mapped) {
       if (minimal) {
-        out.push({ assetId: mapped.assetId, name: mapped.name });
+        available.push({ assetId: mapped.assetId, name: mapped.name });
       } else {
-        out.push(mapped);
+        available.push(mapped);
       }
     }
   }
 
-  sendJson(res, 200, out, req);
+  try {
+    const attributions = await listPrizePoolItemsByAssetIds(available.map((item) => item.assetId));
+    const byAsset = new Map(attributions.map((item) => [item.asset_id, item]));
+    for (const item of available) {
+      const attribution = byAsset.get(item.assetId);
+      if (attribution) {
+        item.donorSteamId = attribution.donor_steam_id;
+        if (attribution.donor_name) {
+          item.donorName = attribution.donor_name;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('[api] Database error loading donation attribution:', err);
+  }
+
+  sendJson(res, 200, available, req);
 }
 
 function handleFriendStatus(ctx: SteamContext, res: ServerResponse, steamId64: string): void {
@@ -262,6 +286,105 @@ async function handleDeliveryRecord(
   sendJson(res, 201, { recorded: true, isFriend, deliveryQueued: isFriend });
 }
 
+async function handleDonationSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Invalid body' });
+    return;
+  }
+  if (body === null || typeof body !== 'object') {
+    sendJson(res, 400, { error: 'Invalid body' });
+    return;
+  }
+
+  const { steamId64, donorName } = body as Record<string, unknown>;
+  if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
+    sendJson(res, 400, { error: 'Invalid steamId64' });
+    return;
+  }
+  const cleanDonorName = typeof donorName === 'string' && donorName.trim() ? donorName.trim() : null;
+
+  try {
+    await createGameDonationSession(steamId64, cleanDonorName);
+  } catch (err) {
+    console.error('[api] Failed to create donation session:', err);
+    sendJson(res, 500, { error: 'Failed to create donation session' });
+    return;
+  }
+
+  sendJson(res, 201, { ok: true, expiresInSeconds: 900 });
+}
+
+async function handlePendingDonations(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  try {
+    const offers = await listPendingDonationOffers();
+    sendJson(
+      res,
+      200,
+      offers.map((offer) => ({
+        tradeOfferId: offer.trade_offer_id,
+        donorSteamId: offer.donor_steam_id,
+        donorName: offer.donor_name,
+        message: offer.message,
+        createdAt: offer.created_at,
+        items: offer.items.map((item) => ({
+          assetId: item.asset_id,
+          name: item.name,
+          appId: item.app_id,
+          contextId: item.context_id,
+          iconUrl: item.icon_url
+        }))
+      })),
+      req
+    );
+  } catch (err) {
+    console.error('[api] Failed to list pending donations:', err);
+    sendJson(res, 500, { error: 'Failed to list pending donations' });
+  }
+}
+
+async function handleDonationReview(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse,
+  tradeOfferId: string,
+  approve: boolean
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Invalid body' });
+    return;
+  }
+
+  const obj = body !== null && typeof body === 'object' ? (body as Record<string, unknown>) : {};
+  const reviewerSteamId =
+    typeof obj.reviewerSteamId === 'string' && isValidSteamId64(obj.reviewerSteamId)
+      ? obj.reviewerSteamId
+      : null;
+  const reviewerName =
+    typeof obj.reviewerName === 'string' && obj.reviewerName.trim()
+      ? obj.reviewerName.trim()
+      : null;
+  const note = typeof obj.note === 'string' && obj.note.trim() ? obj.note.trim() : null;
+
+  try {
+    if (approve) {
+      await approveDonationOffer(ctx, tradeOfferId, { reviewerSteamId, reviewerName, note });
+      sendJson(res, 200, { ok: true, approved: true });
+    } else {
+      await rejectDonationOffer(ctx, tradeOfferId, { reviewerSteamId, reviewerName, note });
+      sendJson(res, 200, { ok: true, rejected: true });
+    }
+  } catch (err) {
+    console.error(`[api] Donation ${approve ? 'approve' : 'reject'} failed:`, err);
+    sendJson(res, 409, { error: err instanceof Error ? err.message : 'Donation review failed' });
+  }
+}
+
 async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const pathname = url.pathname;
@@ -291,6 +414,27 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
 
   if (req.method === 'POST' && pathname === '/delivery/record') {
     await handleDeliveryRecord(ctx, req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/donations/session') {
+    await handleDonationSession(req, res);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/donations/pending') {
+    await handlePendingDonations(res, req);
+    return;
+  }
+
+  const donationReview = pathname.match(/^\/donations\/([^/]+)\/(approve|reject)$/);
+  if (req.method === 'POST' && donationReview) {
+    const tradeOfferId = decodeURIComponent(donationReview[1] ?? '');
+    if (!tradeOfferId) {
+      sendJson(res, 400, { error: 'Missing tradeOfferId' });
+      return;
+    }
+    await handleDonationReview(ctx, req, res, tradeOfferId, donationReview[2] === 'approve');
     return;
   }
 

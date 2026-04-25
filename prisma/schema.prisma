@@ -14,6 +14,25 @@ enum DeliveryStatus {
   cancelled
 }
 
+enum DonationSessionSource {
+  game_command
+  steam_dm
+}
+
+enum DonationSessionStatus {
+  active
+  used
+  expired
+}
+
+enum DonationOfferStatus {
+  pending_review
+  approved
+  rejected
+  expired
+  accepted_failed
+}
+
 model PendingDelivery {
   id                     Int            @id @default(autoincrement())
   winner_steam_id        String         @db.VarChar(32)
@@ -27,4 +46,71 @@ model PendingDelivery {
 
   @@index([winner_steam_id, status])
   @@map("pending_deliveries")
+}
+
+model DonationSession {
+  id             Int                   @id @default(autoincrement())
+  donor_steam_id String                @db.VarChar(32)
+  donor_name     String?               @db.VarChar(128)
+  source         DonationSessionSource
+  status         DonationSessionStatus @default(active)
+  created_at     DateTime              @default(now())
+  expires_at     DateTime
+
+  @@index([donor_steam_id, status, expires_at])
+  @@map("donation_sessions")
+}
+
+model DonationOffer {
+  id               Int                 @id @default(autoincrement())
+  trade_offer_id   String              @unique @db.VarChar(64)
+  donor_steam_id   String              @db.VarChar(32)
+  donor_name       String?             @db.VarChar(128)
+  message          String?             @db.VarChar(512)
+  status           DonationOfferStatus @default(pending_review)
+  reviewed_by_id   String?             @db.VarChar(32)
+  reviewed_by_name String?             @db.VarChar(128)
+  review_note      String?             @db.VarChar(512)
+  created_at       DateTime            @default(now())
+  reviewed_at      DateTime?
+  accepted_at      DateTime?
+
+  items          DonationOfferItem[]
+  prizePoolItems PrizePoolItem[]
+
+  @@index([status, created_at])
+  @@index([donor_steam_id, status])
+  @@map("donation_offers")
+}
+
+model DonationOfferItem {
+  id                Int     @id @default(autoincrement())
+  donation_offer_id Int
+  app_id            Int
+  context_id        String  @db.VarChar(32)
+  asset_id          String  @db.VarChar(256)
+  class_id          String? @db.VarChar(256)
+  instance_id       String? @db.VarChar(256)
+  name              String  @db.VarChar(512)
+  icon_url          String? @db.VarChar(1024)
+
+  donationOffer DonationOffer @relation(fields: [donation_offer_id], references: [id], onDelete: Cascade)
+
+  @@index([donation_offer_id])
+  @@map("donation_offer_items")
+}
+
+model PrizePoolItem {
+  id                Int      @id @default(autoincrement())
+  asset_id          String   @unique @db.VarChar(256)
+  item_name         String   @db.VarChar(512)
+  donor_steam_id    String   @db.VarChar(32)
+  donor_name        String?  @db.VarChar(128)
+  donation_offer_id Int
+  approved_at       DateTime @default(now())
+
+  donationOffer DonationOffer @relation(fields: [donation_offer_id], references: [id])
+
+  @@index([donor_steam_id])
+  @@map("prize_pool_items")
 }
