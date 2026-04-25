@@ -14,7 +14,7 @@ import {
 import type { DonationItemInput, DonationReviewerInput } from '@/db/donations.ts';
 import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { loadTf2InventoryViaOfferManager } from '@/steam/tf2-inventory.ts';
+import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
 type TradeItem = {
   appid?: number | string;
@@ -160,7 +160,13 @@ async function reconcileAcceptedItems(
   donatedItems: DonationItemInput[]
 ): Promise<DonationItemInput[]> {
   try {
-    const inventory = mapDonationItems(await loadTf2InventoryViaOfferManager(ctx.tradeOfferManager));
+    const sid = ctx.user.steamID;
+    if (!sid) {
+      throw new Error('Steam user has no steamID yet');
+    }
+    const inventory = mapDonationItems(
+      await loadTf2InventoryViaCommunity(ctx.community, sid.getSteamID64())
+    );
     const used = new Set<string>();
     return donatedItems.map((donated) => {
       const exact = inventory.find((item) => item.assetId === donated.assetId && !used.has(item.assetId));

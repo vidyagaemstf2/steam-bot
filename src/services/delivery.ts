@@ -7,7 +7,7 @@ import {
 } from '@/db/pending-deliveries.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { loadTf2InventoryViaOfferManager } from '@/steam/tf2-inventory.ts';
+import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
 type OfferItem = Parameters<TradeOffer['addMyItem']>[0];
 type DeliveryFailureCode =
@@ -32,8 +32,13 @@ export type DeliveryAttemptResult =
   | { ok: true; code: 'no_pending'; message: string }
   | { ok: false; code: DeliveryFailureCode; message: string };
 
-async function loadBotTf2Inventory(manager: SteamContext['tradeOfferManager']): Promise<OfferItem[]> {
-  const merged = await loadTf2InventoryViaOfferManager(manager);
+async function loadBotTf2Inventory(ctx: SteamContext): Promise<OfferItem[]> {
+  const sid = ctx.user.steamID;
+  if (!sid) {
+    throw new Error('Steam user has no steamID yet');
+  }
+
+  const merged = await loadTf2InventoryViaCommunity(ctx.community, sid.getSteamID64());
   return merged as OfferItem[];
 }
 
@@ -148,7 +153,7 @@ async function attemptDeliverPrizes(
 
   let inventory: OfferItem[];
   try {
-    inventory = await loadBotTf2Inventory(ctx.tradeOfferManager);
+    inventory = await loadBotTf2Inventory(ctx);
   } catch (err) {
     console.error(`[delivery] Failed to load bot inventory for ${partnerId64}:`, err);
     return await failRows(rowIds, {

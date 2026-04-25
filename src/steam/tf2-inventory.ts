@@ -2,7 +2,7 @@ import type SteamCommunity from 'steamcommunity';
 import type TradeOfferManager from 'steam-tradeoffer-manager';
 import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
 
-type EconTradable = { tradable?: boolean };
+type EconTradable = { tradable?: boolean | number | string };
 
 /**
  * Steam's inventory JSON splits stackables (TF2 metal) into a separate `currency` array.
@@ -14,7 +14,9 @@ export function mergeInventoryAndCurrency<T>(inventory: T[] | undefined, currenc
 
 /** CEconItem sets `tradable`; keep only items safe to put in a trade offer. */
 export function filterTradableEconItems<T extends EconTradable>(items: T[]): T[] {
-  return items.filter((item) => item.tradable === true);
+  return items.filter(
+    (item) => item.tradable === true || item.tradable === 1 || item.tradable === '1'
+  );
 }
 
 export async function loadTf2InventoryViaCommunity(
