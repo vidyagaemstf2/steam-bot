@@ -278,17 +278,21 @@ export async function tryRecordIncomingDonationOffer(
 ): Promise<boolean> {
   const donorSteamId = offer.partner.getSteamID64();
   const message = offerMessage(offer);
-  const hasDonationIntent = includesDonationCommand(message);
-
-  if (!hasDonationIntent) {
-    return false;
-  }
-
-  const activeSession = await findActiveDonationSession(donorSteamId);
-
   const offerId = offer.id;
   if (offerId === null || offerId === undefined) {
     throw new Error('La oferta de donacion no tiene ID de oferta de intercambio');
+  }
+
+  const existingPending = await findPendingDonationOffer(String(offerId));
+  if (existingPending) {
+    return true;
+  }
+
+  const activeSession = await findActiveDonationSession(donorSteamId);
+  const hasDonationIntent = includesDonationCommand(message) || activeSession !== null;
+
+  if (!hasDonationIntent) {
+    return false;
   }
 
   if (offer.itemsToGive.length > 0) {
@@ -419,7 +423,7 @@ export function registerDonationChat(ctx: SteamContext): void {
         : `Ya tenes una ventana de donacion abierta por unos ${String(session.expiresInSeconds)} segundos mas.`;
       await ctx.user.chat.sendFriendMessage(
         donorSteamId,
-        `${prefix} Mandame una oferta con solo items de TF2 para donar, e inclui !donar o !donate en el mensaje de la oferta. Un admin la va a revisar antes de que yo la acepte.`
+        `${prefix} Mandame una oferta con solo items de TF2 para donar. Si mandas una oferta directa sin ventana activa, inclui !donar o !donate en el mensaje. Un admin la va a revisar antes de que yo la acepte.`
       );
     })().catch((err: unknown) => {
       console.error(`[donations] Error handling !donate from ${donorSteamId}:`, err);
