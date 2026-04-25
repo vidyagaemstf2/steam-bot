@@ -49,13 +49,14 @@ model PendingDelivery {
 }
 
 model DonationSession {
-  id             Int                   @id @default(autoincrement())
-  donor_steam_id String                @db.VarChar(32)
-  donor_name     String?               @db.VarChar(128)
-  source         DonationSessionSource
-  status         DonationSessionStatus @default(active)
-  created_at     DateTime              @default(now())
-  expires_at     DateTime
+  id                 Int                   @id @default(autoincrement())
+  donor_steam_id     String                @db.VarChar(32)
+  active_session_key String?               @unique @db.VarChar(32)
+  donor_name         String?               @db.VarChar(128)
+  source             DonationSessionSource
+  status             DonationSessionStatus @default(active)
+  created_at         DateTime              @default(now())
+  expires_at         DateTime
 
   @@index([donor_steam_id, status, expires_at])
   @@map("donation_sessions")

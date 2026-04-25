@@ -36,6 +36,16 @@ type SteamIdLike = {
 const DONATION_COMMAND = '!donate';
 let donationChatRegistered = false;
 
+export type DonationSessionView = {
+  created: boolean;
+  expiresAt: Date;
+  expiresInSeconds: number;
+};
+
+function secondsUntil(date: Date): number {
+  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+}
+
 function includesDonationCommand(message: string | null): boolean {
   return (message ?? '').toLowerCase().split(/\s+/).includes(DONATION_COMMAND);
 }
@@ -175,15 +185,25 @@ function declineOffer(offer: TradeOffer): Promise<void> {
 export async function createGameDonationSession(
   donorSteamId: string,
   donorName: string | null
-): Promise<void> {
-  await createDonationSession(donorSteamId, donorName, 'game_command');
+): Promise<DonationSessionView> {
+  const result = await createDonationSession(donorSteamId, donorName, 'game_command');
+  return {
+    created: result.created,
+    expiresAt: result.session.expires_at,
+    expiresInSeconds: secondsUntil(result.session.expires_at)
+  };
 }
 
 export async function createSteamDonationSession(
   donorSteamId: string,
   donorName: string | null
-): Promise<void> {
-  await createDonationSession(donorSteamId, donorName, 'steam_dm');
+): Promise<DonationSessionView> {
+  const result = await createDonationSession(donorSteamId, donorName, 'steam_dm');
+  return {
+    created: result.created,
+    expiresAt: result.session.expires_at,
+    expiresInSeconds: secondsUntil(result.session.expires_at)
+  };
 }
 
 export async function shouldAllowDonationFriendRequest(donorSteamId: string): Promise<boolean> {
@@ -320,10 +340,13 @@ export function registerDonationChat(ctx: SteamContext): void {
     const donorSteamId = friendSid.getSteamID64();
 
     void (async () => {
-      await createSteamDonationSession(donorSteamId, null);
+      const session = await createSteamDonationSession(donorSteamId, null);
+      const prefix = session.created
+        ? 'Donation window opened for 15 minutes.'
+        : `You already have a donation window open for about ${String(session.expiresInSeconds)} more seconds.`;
       await ctx.user.chat.sendFriendMessage(
         donorSteamId,
-        'Donation window opened for 15 minutes. Send me a trade offer containing only donated TF2 items, with !donate in the trade message. An admin will review it before I accept.'
+        `${prefix} Send me a trade offer containing only donated TF2 items, with !donate in the trade message. An admin will review it before I accept.`
       );
     })().catch((err: unknown) => {
       console.error(`[donations] Error handling !donate from ${donorSteamId}:`, err);

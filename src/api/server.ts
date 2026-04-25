@@ -307,14 +307,18 @@ async function handleDonationSession(req: IncomingMessage, res: ServerResponse):
   const cleanDonorName = typeof donorName === 'string' && donorName.trim() ? donorName.trim() : null;
 
   try {
-    await createGameDonationSession(steamId64, cleanDonorName);
+    const session = await createGameDonationSession(steamId64, cleanDonorName);
+    sendJson(res, session.created ? 201 : 200, {
+      ok: true,
+      alreadyActive: !session.created,
+      expiresAt: session.expiresAt,
+      expiresInSeconds: session.expiresInSeconds
+    });
   } catch (err) {
     console.error('[api] Failed to create donation session:', err);
     sendJson(res, 500, { error: 'Failed to create donation session' });
     return;
   }
-
-  sendJson(res, 201, { ok: true, expiresInSeconds: 900 });
 }
 
 async function handlePendingDonations(res: ServerResponse, req: IncomingMessage): Promise<void> {

@@ -28,10 +28,26 @@ export type PendingDonationOffer = DonationOffer & {
   items: DonationOfferItem[];
 };
 
+export type DonationSessionResult = {
+  session: DonationSession;
+  created: boolean;
+};
+
 const DONATION_SESSION_MS = 15 * 60 * 1000;
 
 function expiryDate(now = new Date()): Date {
   return new Date(now.getTime() + DONATION_SESSION_MS);
+}
+
+function activeDonationSessionKey(donorSteamId: string): string {
+  return donorSteamId;
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  if (err === null || typeof err !== 'object') {
+    return false;
+  }
+  return (err as { code?: unknown }).code === 'P2002';
 }
 
 export async function expireOldDonationSessions(now = new Date()): Promise<void> {
@@ -42,24 +58,48 @@ export async function expireOldDonationSessions(now = new Date()): Promise<void>
     },
     data: { status: 'expired' }
   });
+  await prisma.donationSession.updateMany({
+    where: {
+      status: { not: 'active' },
+      active_session_key: { not: null }
+    },
+    data: { active_session_key: null }
+  });
 }
 
 export async function createDonationSession(
   donorSteamId: string,
   donorName: string | null,
   source: DonationSessionSource
-): Promise<DonationSession> {
+): Promise<DonationSessionResult> {
   const now = new Date();
   await expireOldDonationSessions(now);
-  return prisma.donationSession.create({
-    data: {
-      donor_steam_id: donorSteamId,
-      donor_name: donorName,
-      source,
-      status: 'active',
-      expires_at: expiryDate(now)
+  const existing = await findActiveDonationSession(donorSteamId);
+  if (existing) {
+    return { session: existing, created: false };
+  }
+
+  try {
+    const session = await prisma.donationSession.create({
+      data: {
+        donor_steam_id: donorSteamId,
+        active_session_key: activeDonationSessionKey(donorSteamId),
+        donor_name: donorName,
+        source,
+        status: 'active',
+        expires_at: expiryDate(now)
+      }
+    });
+    return { session, created: true };
+  } catch (err) {
+    if (isUniqueConstraintError(err)) {
+      const current = await findActiveDonationSession(donorSteamId);
+      if (current) {
+        return { session: current, created: false };
+      }
     }
-  });
+    throw err;
+  }
 }
 
 export async function findActiveDonationSession(
@@ -89,7 +129,7 @@ export async function markDonationSessionsUsed(donorSteamId: string): Promise<vo
       status: 'active',
       expires_at: { gte: new Date() }
     },
-    data: { status: 'used' }
+    data: { status: 'used', active_session_key: null }
   });
 }
 
