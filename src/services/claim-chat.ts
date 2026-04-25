@@ -1,6 +1,6 @@
 import SteamUser from 'steam-user';
 import { hasPendingForWinner } from '@/db/pending-deliveries.ts';
-import { triggerPrizeDelivery } from '@/services/delivery.ts';
+import { requestPrizeDelivery } from '@/services/delivery.ts';
 import type { SteamContext } from '@/steam/session.ts';
 
 let claimChatRegistered = false;
@@ -53,9 +53,10 @@ export function registerClaimChat(ctx: SteamContext): void {
       }
 
       await send(
-        'Estoy revisando tu entrega pendiente. Si los items estan en mi inventario, te mando una oferta en un momento.'
+        'Estoy revisando tu entrega pendiente. Si Steam me deja mandar la oferta, te aviso en un momento.'
       );
-      triggerPrizeDelivery(ctx, id64);
+      const result = await requestPrizeDelivery(ctx, id64);
+      await send(result.message);
     })().catch((err: unknown) => {
       console.error(`[claim-chat] Error handling !claim from ${id64}:`, err);
     });

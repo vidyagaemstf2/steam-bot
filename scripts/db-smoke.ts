@@ -12,6 +12,7 @@ import {
   listPendingRowsForWinner,
   listReservedAssetIds,
   markDeliveredByTradeOfferId,
+  markRowsDeliveryAttemptFailed,
   markRowsOfferSent,
   resetOfferSentToPending,
   resetOfferSentToPendingByTradeOfferId
@@ -48,6 +49,19 @@ async function main(): Promise<void> {
   const reserved = await listReservedAssetIds();
   if (!reserved.includes(assetId)) {
     throw new Error('listReservedAssetIds missing asset');
+  }
+
+  await markRowsDeliveryAttemptFailed([id], {
+    code: 'smoke_failure',
+    message: 'db-smoke failure message'
+  });
+  const failedAttempt = await prisma.pendingDelivery.findUnique({ where: { id } });
+  if (
+    failedAttempt?.last_failure_code !== 'smoke_failure' ||
+    failedAttempt.last_failure_message !== 'db-smoke failure message' ||
+    !failedAttempt.last_attempt_at
+  ) {
+    throw new Error('markRowsDeliveryAttemptFailed');
   }
 
   const tid = `smoke_tid_${String(runId)}`;

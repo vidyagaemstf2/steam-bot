@@ -3,8 +3,17 @@ import type { PendingDelivery } from '../../generated/prisma/client.ts';
 
 const RESERVED_STATUSES = ['pending', 'offer_sent'] as const;
 
+export type DeliveryFailureInput = {
+  code: string;
+  message: string;
+};
+
 function activeReservationKey(winnerSteamId: string, assetId: string): string {
   return `${winnerSteamId}:${assetId}`;
+}
+
+function truncate(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max) : s;
 }
 
 function isUniqueConstraintError(err: unknown): boolean {
@@ -85,6 +94,9 @@ export async function markRowsOfferSent(ids: number[], tradeOfferId: string): Pr
         data: {
           status: 'offer_sent',
           trade_offer_id: tradeOfferId,
+          last_attempt_at: new Date(),
+          last_failure_code: null,
+          last_failure_message: null,
           active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
         }
       })
@@ -95,7 +107,30 @@ export async function markRowsOfferSent(ids: number[], tradeOfferId: string): Pr
 export async function markDeliveredByTradeOfferId(tradeOfferId: string): Promise<void> {
   await prisma.pendingDelivery.updateMany({
     where: { trade_offer_id: tradeOfferId, status: 'offer_sent' },
-    data: { status: 'delivered', delivered_at: new Date(), active_reservation_key: null }
+    data: {
+      status: 'delivered',
+      delivered_at: new Date(),
+      active_reservation_key: null,
+      last_failure_code: null,
+      last_failure_message: null
+    }
+  });
+}
+
+export async function markRowsDeliveryAttemptFailed(
+  ids: number[],
+  failure: DeliveryFailureInput
+): Promise<void> {
+  if (ids.length === 0) {
+    return;
+  }
+  await prisma.pendingDelivery.updateMany({
+    where: { id: { in: ids }, status: 'pending' },
+    data: {
+      last_attempt_at: new Date(),
+      last_failure_code: truncate(failure.code, 64),
+      last_failure_message: truncate(failure.message, 512)
+    }
   });
 }
 
@@ -115,6 +150,8 @@ export async function resetOfferSentToPending(ids: number[]): Promise<void> {
           status: 'pending',
           trade_offer_id: null,
           delivered_at: null,
+          last_failure_code: null,
+          last_failure_message: null,
           active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
         }
       })
@@ -135,6 +172,8 @@ export async function resetOfferSentToPendingByTradeOfferId(tradeOfferId: string
           status: 'pending',
           trade_offer_id: null,
           delivered_at: null,
+          last_failure_code: null,
+          last_failure_message: null,
           active_reservation_key: activeReservationKey(row.winner_steam_id, row.asset_id)
         }
       })

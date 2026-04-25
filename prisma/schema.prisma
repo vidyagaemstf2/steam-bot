@@ -43,6 +43,9 @@ model PendingDelivery {
   created_at             DateTime       @default(now())
   delivered_at           DateTime?
   trade_offer_id         String?        @db.VarChar(64)
+  last_attempt_at        DateTime?
+  last_failure_code      String?        @db.VarChar(64)
+  last_failure_message   String?        @db.VarChar(512)
 
   @@index([winner_steam_id, status])
   @@map("pending_deliveries")
