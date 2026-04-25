@@ -34,6 +34,7 @@ export type DonationSessionResult = {
 };
 
 const DONATION_SESSION_MS = 15 * 60 * 1000;
+const DONATION_APPROVAL_TRANSACTION_TIMEOUT_MS = 30_000;
 
 function expiryDate(now = new Date()): Date {
   return new Date(now.getTime() + DONATION_SESSION_MS);
@@ -241,39 +242,43 @@ export async function markDonationApproved(
   prizeItems: DonationItemInput[]
 ): Promise<void> {
   const now = new Date();
-  await prisma.$transaction([
-    prisma.donationOffer.update({
-      where: { trade_offer_id: offer.trade_offer_id },
-      data: {
-        status: 'approved',
-        reviewed_by_id: reviewer.reviewerSteamId,
-        reviewed_by_name: reviewer.reviewerName,
-        review_note: reviewer.note,
-        reviewed_at: now,
-        accepted_at: now
-      }
-    }),
-    ...prizeItems.map((item) =>
-      prisma.prizePoolItem.upsert({
-        where: { asset_id: item.assetId },
-        update: {
-          item_name: item.name,
-          donor_steam_id: offer.donor_steam_id,
-          donor_name: offer.donor_name,
-          donation_offer_id: offer.id,
-          approved_at: now
-        },
-        create: {
-          asset_id: item.assetId,
-          item_name: item.name,
-          donor_steam_id: offer.donor_steam_id,
-          donor_name: offer.donor_name,
-          donation_offer_id: offer.id,
-          approved_at: now
+  await prisma.$transaction(
+    async (tx) => {
+      await tx.donationOffer.update({
+        where: { trade_offer_id: offer.trade_offer_id },
+        data: {
+          status: 'approved',
+          reviewed_by_id: reviewer.reviewerSteamId,
+          reviewed_by_name: reviewer.reviewerName,
+          review_note: reviewer.note,
+          reviewed_at: now,
+          accepted_at: now
         }
-      })
-    )
-  ]);
+      });
+
+      for (const item of prizeItems) {
+        await tx.prizePoolItem.upsert({
+          where: { asset_id: item.assetId },
+          update: {
+            item_name: item.name,
+            donor_steam_id: offer.donor_steam_id,
+            donor_name: offer.donor_name,
+            donation_offer_id: offer.id,
+            approved_at: now
+          },
+          create: {
+            asset_id: item.assetId,
+            item_name: item.name,
+            donor_steam_id: offer.donor_steam_id,
+            donor_name: offer.donor_name,
+            donation_offer_id: offer.id,
+            approved_at: now
+          }
+        });
+      }
+    },
+    { timeout: DONATION_APPROVAL_TRANSACTION_TIMEOUT_MS }
+  );
 }
 
 export async function listPrizePoolItemsByAssetIds(assetIds: string[]): Promise<PrizePoolItem[]> {

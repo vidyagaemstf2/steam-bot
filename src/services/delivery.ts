@@ -171,16 +171,24 @@ async function attemptDeliverPrizes(
     }
   }
 
-  const uniqueAssetIds = [...new Set(rows.map((r) => normalizeDbAssetId(r.asset_id)))];
   const missing: string[] = [];
+  const missingRowIds: number[] = [];
+  const deliverableRowIds: number[] = [];
   const itemsToAttach: OfferItem[] = [];
+  const attachedAssetIds = new Set<string>();
 
-  for (const aid of uniqueAssetIds) {
+  for (const row of rows) {
+    const aid = normalizeDbAssetId(row.asset_id);
     const found = byAsset.get(aid);
     if (!found) {
       missing.push(aid);
+      missingRowIds.push(row.id);
     } else {
-      itemsToAttach.push(found);
+      deliverableRowIds.push(row.id);
+      if (!attachedAssetIds.has(aid)) {
+        itemsToAttach.push(found);
+        attachedAssetIds.add(aid);
+      }
     }
   }
 
@@ -188,11 +196,19 @@ async function attemptDeliverPrizes(
     console.error(
       `[delivery] Cannot send prize offer to ${partnerId64}: assets not in bot tradable inventory: ${missing.join(', ')}`
     );
-    return await failRows(rowIds, {
+    await markRowsDeliveryAttemptFailed(missingRowIds, {
       code: 'bot_item_missing',
       message:
         'No encontre el item del premio en el inventario tradable del bot. Esto necesita que un admin lo revise.'
     });
+    if (itemsToAttach.length === 0) {
+      return {
+        ok: false,
+        code: 'bot_item_missing',
+        message:
+          'No encontre el item del premio en el inventario tradable del bot. Esto necesita que un admin lo revise.'
+      };
+    }
   }
 
   const offer = ctx.tradeOfferManager.createOffer(partnerId64);
@@ -248,13 +264,13 @@ async function attemptDeliverPrizes(
   }
 
   try {
-    await markRowsOfferSent(rowIds, idStr);
+    await markRowsOfferSent(deliverableRowIds, idStr);
     console.log(
-      `[delivery] Marked ${String(rows.length)} row(s) as offer_sent trade_offer_id=${idStr}`
+      `[delivery] Marked ${String(deliverableRowIds.length)} row(s) as offer_sent trade_offer_id=${idStr}`
     );
   } catch (err) {
     console.error(`[delivery] Failed to update DB after offer ${idStr}:`, err);
-    return await failRows(rowIds, {
+    return await failRows(deliverableRowIds, {
       code: 'database_update_failed',
       message:
         'La oferta se creo, pero falle guardando el estado en la base de datos. Avisale a un admin antes de reintentar.'
@@ -265,7 +281,10 @@ async function attemptDeliverPrizes(
     ok: true,
     code: 'sent',
     tradeOfferId: idStr,
-    message: 'Listo, te mande la oferta de intercambio. Revisala en Steam.'
+    message:
+      missing.length > 0
+        ? 'Te mande una oferta con los premios que encontre. Algunos premios no estaban en el inventario tradable del bot y necesitan revision de un admin.'
+        : 'Listo, te mande la oferta de intercambio. Revisala en Steam.'
   };
 }
 

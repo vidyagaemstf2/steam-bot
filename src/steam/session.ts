@@ -26,12 +26,14 @@ const RELOGIN_BASE_DELAY_MS = 15_000;
 const RELOGIN_MAX_ATTEMPTS = 5;
 const SESSION_CONFLICT_RETRY_MS = 2 * 60 * 1000;
 const HEALTH_CHECK_INTERVAL_MS = 60_000;
+const LOGOFF_WAIT_MS = 5_000;
 
 let reloginAttempts = 0;
 let reloginTimer: ReturnType<typeof setTimeout> | null = null;
 let healthCheckTimer: ReturnType<typeof setInterval> | null = null;
 let inSessionConflict = false;
 let isShuttingDown = false;
+let shutdownPromise: Promise<void> | null = null;
 
 export function getSteamContext(): SteamContext | null {
   return context;
@@ -110,21 +112,51 @@ function startHealthCheck(user: SteamUser): void {
   }, HEALTH_CHECK_INTERVAL_MS);
 }
 
-export function shutdownSteam(): void {
-  isShuttingDown = true;
-  clearReloginTimer();
-  clearHealthCheckTimer();
+export async function shutdownSteam(): Promise<void> {
+  if (shutdownPromise) {
+    return shutdownPromise;
+  }
 
-  const ctx = context;
-  if (!ctx) {
-    return;
-  }
-  try {
-    ctx.user.logOff();
-  } catch (err) {
-    console.error('[steam] logOff failed:', err);
-  }
-  context = null;
+  shutdownPromise = (async () => {
+    isShuttingDown = true;
+    clearReloginTimer();
+    clearHealthCheckTimer();
+
+    const ctx = context;
+    context = null;
+    if (!ctx) {
+      return;
+    }
+
+    if (!ctx.user.steamID) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      const done = (): void => {
+        clearTimeout(timer);
+        ctx.user.off('disconnected', done);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        ctx.user.off('disconnected', done);
+        console.warn('[steam] Timed out waiting for Steam logOff disconnect.');
+        resolve();
+      }, LOGOFF_WAIT_MS);
+
+      try {
+        ctx.user.once('disconnected', done);
+        ctx.user.logOff();
+      } catch (err) {
+        clearTimeout(timer);
+        ctx.user.off('disconnected', done);
+        console.error('[steam] logOff failed:', err);
+        resolve();
+      }
+    });
+  })();
+
+  return shutdownPromise;
 }
 
 /**

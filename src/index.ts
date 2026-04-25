@@ -4,7 +4,7 @@ import { prisma, shutdownSteam, startBot } from '@/bot.ts';
 
 setupErrorHandlers(async () => {
   await stopApiServer();
-  shutdownSteam();
+  await shutdownSteam();
   await prisma.$disconnect();
 });
 

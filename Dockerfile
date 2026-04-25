@@ -28,4 +28,5 @@ COPY prisma.config.ts tsconfig.json ./
 COPY src ./src
 
 EXPOSE 3000
-CMD ["pnpm", "start"]
+STOPSIGNAL SIGTERM
+CMD ["node", "--import", "tsx/esm", "src/index.ts"]

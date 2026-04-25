@@ -11,7 +11,11 @@ import {
   markDonationSessionsUsed,
   recordDonationOffer
 } from '@/db/donations.ts';
-import type { DonationItemInput, DonationReviewerInput } from '@/db/donations.ts';
+import type {
+  DonationItemInput,
+  DonationReviewerInput,
+  PendingDonationOffer
+} from '@/db/donations.ts';
 import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
@@ -149,6 +153,18 @@ function allItemsAreTf2(items: DonationItemInput[]): boolean {
   return items.every(
     (item) => item.appId === TF2_APP_ID && item.contextId === String(TF2_CONTEXT_ID)
   );
+}
+
+function pendingOfferItemsToDonationItems(items: PendingDonationOffer['items']): DonationItemInput[] {
+  return items.map((item) => ({
+    appId: item.app_id,
+    contextId: item.context_id,
+    assetId: item.asset_id,
+    classId: item.class_id,
+    instanceId: item.instance_id,
+    name: item.name,
+    iconUrl: item.icon_url
+  }));
 }
 
 function itemIdentityKey(item: DonationItemInput): string {
@@ -316,7 +332,8 @@ export async function approveDonationOffer(
     throw err;
   }
 
-  if (offer.state !== TradeOfferManager.ETradeOfferState.Active) {
+  const offerAlreadyAccepted = offer.state === TradeOfferManager.ETradeOfferState.Accepted;
+  if (offer.state !== TradeOfferManager.ETradeOfferState.Active && !offerAlreadyAccepted) {
     const reason = `La oferta de Steam no esta activa (estado=${String(offer.state)})`;
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
@@ -328,19 +345,24 @@ export async function approveDonationOffer(
     throw new Error(reason);
   }
 
-  const items = mapDonationItems(offer.itemsToReceive as unknown[]);
+  const offerItems = mapDonationItems(offer.itemsToReceive as unknown[]);
+  const items = offerItems.length > 0 ? offerItems : pendingOfferItemsToDonationItems(pending.items);
   if (items.length === 0 || !allItemsAreTf2(items)) {
     const reason = 'La oferta de donacion no tiene items de TF2 aceptables';
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
   }
 
-  try {
-    const status = await acceptOffer(offer);
-    console.log(`[donations] Accepted donation offer ${tradeOfferId} (status: ${status})`);
-  } catch (err) {
-    await markDonationAcceptedFailed(tradeOfferId, reviewer, String(err));
-    throw err;
+  if (offerAlreadyAccepted) {
+    console.log(`[donations] Donation offer ${tradeOfferId} was already accepted; finalizing DB state`);
+  } else {
+    try {
+      const status = await acceptOffer(offer);
+      console.log(`[donations] Accepted donation offer ${tradeOfferId} (status: ${status})`);
+    } catch (err) {
+      await markDonationAcceptedFailed(tradeOfferId, reviewer, String(err));
+      throw err;
+    }
   }
 
   const currentItems = await reconcileAcceptedItems(ctx, items);
