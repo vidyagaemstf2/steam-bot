@@ -46,7 +46,7 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
 
   if (!isBotAdmin(steamId)) {
     try {
-      const recordedDonation = await tryRecordIncomingDonationOffer(offer);
+      const recordedDonation = await tryRecordIncomingDonationOffer(offer, ctx);
       if (recordedDonation) {
         console.log(`[trades] Donation offer ${offerId} from ${steamId} queued for admin review`);
         return;

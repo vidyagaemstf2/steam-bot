@@ -87,6 +87,43 @@ function tradeItemIconUrl(item: TradeItem): string | null {
   return typeof item.icon_url === 'string' && item.icon_url.length > 0 ? item.icon_url : null;
 }
 
+function personaDisplayName(persona: unknown): string | null {
+  if (persona === null || typeof persona !== 'object') {
+    return null;
+  }
+  const obj = persona as Record<string, unknown>;
+  const candidates = [obj.persona_name, obj.player_name, obj.personaName, obj.name];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+async function resolveSteamDisplayName(
+  ctx: SteamContext,
+  steamId64: string,
+  fallback: string | null
+): Promise<string | null> {
+  const cached = personaDisplayName(ctx.user.users[steamId64]);
+  if (cached) {
+    return cached;
+  }
+
+  try {
+    const { personas } = await ctx.user.getPersonas([steamId64]);
+    const resolved = personaDisplayName(personas[steamId64]);
+    if (resolved) {
+      return resolved;
+    }
+  } catch (err) {
+    console.error(`[donations] Failed to resolve Steam persona for ${steamId64}:`, err);
+  }
+
+  return fallback;
+}
+
 function mapDonationItems(items: unknown[]): DonationItemInput[] {
   const mapped: DonationItemInput[] = [];
   for (const raw of items) {
@@ -213,7 +250,10 @@ export async function shouldAllowDonationFriendRequest(donorSteamId: string): Pr
   return hasActiveDonationSession(donorSteamId);
 }
 
-export async function tryRecordIncomingDonationOffer(offer: TradeOffer): Promise<boolean> {
+export async function tryRecordIncomingDonationOffer(
+  offer: TradeOffer,
+  ctx: SteamContext
+): Promise<boolean> {
   const donorSteamId = offer.partner.getSteamID64();
   const message = offerMessage(offer);
   const activeSession = await findActiveDonationSession(donorSteamId);
@@ -243,7 +283,7 @@ export async function tryRecordIncomingDonationOffer(offer: TradeOffer): Promise
   await recordDonationOffer({
     tradeOfferId: String(offerId),
     donorSteamId,
-    donorName: activeSession?.donor_name ?? null,
+    donorName: await resolveSteamDisplayName(ctx, donorSteamId, activeSession?.donor_name ?? null),
     message,
     items
   });
@@ -343,7 +383,8 @@ export function registerDonationChat(ctx: SteamContext): void {
     const donorSteamId = friendSid.getSteamID64();
 
     void (async () => {
-      const session = await createSteamDonationSession(donorSteamId, null);
+      const donorName = await resolveSteamDisplayName(ctx, donorSteamId, null);
+      const session = await createSteamDonationSession(donorSteamId, donorName);
       const prefix = session.created
         ? 'Ventana de donacion abierta por 15 minutos.'
         : `Ya tenes una ventana de donacion abierta por unos ${String(session.expiresInSeconds)} segundos mas.`;
