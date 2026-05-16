@@ -7,6 +7,7 @@ import { listPendingDonationOffers, listPrizePoolItemsByAssetIds } from '@/db/do
 import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
+import { Colors, notify } from '@/utils/discord.ts';
 import {
   approveDonationOffer,
   createGameDonationSession,
@@ -286,6 +287,89 @@ async function handleDeliveryRecord(
   sendJson(res, 201, { recorded: true, isFriend, deliveryQueued: isFriend });
 }
 
+async function handleAdminSend(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
+    return;
+  }
+  if (body === null || typeof body !== 'object') {
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
+    return;
+  }
+
+  const { winnerSteamId, items } = body as Record<string, unknown>;
+
+  if (typeof winnerSteamId !== 'string' || !isValidSteamId64(winnerSteamId)) {
+    sendJson(res, 400, { error: 'winnerSteamId invalido' });
+    return;
+  }
+  if (!Array.isArray(items) || items.length === 0) {
+    sendJson(res, 400, { error: 'items debe ser un array no vacio' });
+    return;
+  }
+  for (const item of items as unknown[]) {
+    if (
+      item === null ||
+      typeof item !== 'object' ||
+      typeof (item as Record<string, unknown>).assetId !== 'string' ||
+      ((item as Record<string, unknown>).assetId as string).trim().length === 0 ||
+      typeof (item as Record<string, unknown>).itemName !== 'string' ||
+      ((item as Record<string, unknown>).itemName as string).trim().length === 0
+    ) {
+      sendJson(res, 400, { error: 'Cada item debe tener assetId e itemName no vacios' });
+      return;
+    }
+  }
+
+  const expiryDays = env.MANUAL_DELIVERY_EXPIRY_DAYS;
+  const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
+
+  try {
+    for (const raw of items as Record<string, unknown>[]) {
+      await createPendingDelivery(
+        winnerSteamId,
+        (raw.assetId as string).trim(),
+        (raw.itemName as string).trim(),
+        expiresAt
+      );
+    }
+  } catch (err) {
+    console.error('[api] Failed to record admin delivery:', err);
+    sendJson(res, 500, { error: 'No se pudo registrar la entrega' });
+    return;
+  }
+
+  const isFriend = ctx.user.myFriends[winnerSteamId] === SteamUser.EFriendRelationship.Friend;
+  if (isFriend) {
+    triggerPrizeDelivery(ctx, winnerSteamId);
+  }
+
+  void notify('admin', {
+    title: 'Manual delivery queued',
+    description: `${String(items.length)} item(s) queued for \`${winnerSteamId}\`. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
+    color: Colors.Blue,
+    fields: (items as Record<string, unknown>[]).map((it) => ({
+      name: (it.assetId as string).trim(),
+      value: (it.itemName as string).trim(),
+      inline: true
+    }))
+  });
+
+  sendJson(res, 201, {
+    recorded: true,
+    count: items.length,
+    isFriend,
+    deliveryQueued: isFriend
+  });
+}
+
 async function handleDonationSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let body: unknown;
   try {
@@ -421,6 +505,11 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
     return;
   }
 
+  if (req.method === 'POST' && pathname === '/delivery/admin-send') {
+    await handleAdminSend(ctx, req, res);
+    return;
+  }
+
   if (req.method === 'POST' && pathname === '/donations/session') {
     await handleDonationSession(req, res);
     return;
@@ -475,7 +564,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       });
       apiServer = server;
       console.log(
-        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record`
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send`
       );
       resolve();
     });

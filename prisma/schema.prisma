@@ -46,6 +46,7 @@ model PendingDelivery {
   last_attempt_at        DateTime?
   last_failure_code      String?        @db.VarChar(64)
   last_failure_message   String?        @db.VarChar(512)
+  expires_at             DateTime?
 
   @@index([winner_steam_id, status])
   @@map("pending_deliveries")

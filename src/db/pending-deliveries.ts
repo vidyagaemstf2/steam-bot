@@ -190,7 +190,8 @@ export async function findRowsByTradeOfferId(tradeOfferId: string): Promise<Pend
 export async function createPendingDelivery(
   winnerSteamId: string,
   assetId: string,
-  itemName: string
+  itemName: string,
+  expiresAt?: Date
 ): Promise<PendingDelivery> {
   const normalizedAssetId = assetId.trim();
   const existing = await findActiveDeliveryForAsset(winnerSteamId, normalizedAssetId);
@@ -205,7 +206,8 @@ export async function createPendingDelivery(
         asset_id: normalizedAssetId,
         active_reservation_key: activeReservationKey(winnerSteamId, normalizedAssetId),
         item_name: itemName,
-        status: 'pending'
+        status: 'pending',
+        expires_at: expiresAt ?? null
       }
     });
   } catch (err) {
@@ -217,4 +219,22 @@ export async function createPendingDelivery(
     }
     throw err;
   }
+}
+
+export async function cancelExpiredDeliveries(): Promise<PendingDelivery[]> {
+  const now = new Date();
+  const expired = await prisma.pendingDelivery.findMany({
+    where: {
+      status: 'pending',
+      expires_at: { not: null, lt: now }
+    }
+  });
+  if (expired.length === 0) {
+    return [];
+  }
+  await prisma.pendingDelivery.updateMany({
+    where: { id: { in: expired.map((r) => r.id) } },
+    data: { status: 'cancelled', active_reservation_key: null }
+  });
+  return expired;
 }

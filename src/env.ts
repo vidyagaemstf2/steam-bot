@@ -37,7 +37,9 @@ export const env = createEnv({
     /** Discord webhook URL for the private admin/ops channel. */
     DISCORD_WEBHOOK_ADMIN: z.string().url().optional(),
     /** Discord webhook URL for the public donations announcement channel. */
-    DISCORD_WEBHOOK_DONATIONS: z.string().url().optional()
+    DISCORD_WEBHOOK_DONATIONS: z.string().url().optional(),
+    /** Days before an admin-initiated unclaimed delivery is auto-cancelled. */
+    MANUAL_DELIVERY_EXPIRY_DAYS: z.coerce.number().int().min(1).default(7)
   },
   runtimeEnv,
   emptyStringAsUndefined: true
