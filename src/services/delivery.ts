@@ -63,6 +63,18 @@ function normalizeDbAssetId(raw: string): string {
   return raw.trim().replace(/^"+|"+$/g, '');
 }
 
+function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
+  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
+    | Record<string, unknown>
+    | undefined;
+  if (!persona) return steamId64;
+  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
+    const v = persona[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return steamId64;
+}
+
 function errorText(err: unknown): string {
   if (err instanceof Error) {
     return err.message;
@@ -202,11 +214,16 @@ async function attemptDeliverPrizes(
       message:
         'No encontre el item del premio en el inventario tradable del bot. Esto necesita que un admin lo revise.'
     });
+    const winnerLabel = resolvePersonaName(ctx, partnerId64);
+    const missingNames = rows
+      .filter((r) => missingRowIds.includes(r.id))
+      .map((r) => `• ${r.item_name}`)
+      .join('\n') || missing.join('\n');
     void notify('admin', {
-      title: 'Prize item missing from inventory',
-      description: `Cannot deliver to \`${partnerId64}\` — item(s) not found in tradable inventory.`,
+      title: '⚠️ Items faltantes en inventario',
+      description: `No se pudo entregar a **${winnerLabel}** — item(s) no encontrados en el inventario tradable.`,
       color: Colors.Red,
-      fields: [{ name: 'Missing asset IDs', value: missing.join(', ') }],
+      fields: [{ name: 'Items faltantes', value: missingNames }],
     });
     if (itemsToAttach.length === 0) {
       return {
@@ -262,11 +279,19 @@ async function attemptDeliverPrizes(
       console.log(`[delivery] Offer ${idStr} confirmed via STEAM_IDENTITY_SECRET`);
     } catch (err) {
       console.error(`[delivery] Failed to confirm offer ${idStr}:`, err);
+      const winnerLabelConf = resolvePersonaName(ctx, partnerId64);
+      const confItems = rows
+        .filter((r) => deliverableRowIds.includes(r.id))
+        .map((r) => `• ${r.item_name}`)
+        .join('\n') || '—';
       void notify('admin', {
-        title: 'Trade offer confirmation failed',
-        description: `Offer \`${idStr}\` to \`${partnerId64}\` was created but mobile confirmation failed. Bot needs attention.`,
+        title: '❌ Confirmación móvil fallida',
+        description: `La oferta a **${winnerLabelConf}** fue creada pero la confirmación móvil falló. El bot necesita atención.`,
         color: Colors.Red,
-        fields: [{ name: 'Error', value: err instanceof Error ? err.message : String(err) }],
+        fields: [
+          { name: 'Items', value: confItems },
+          { name: 'Error', value: err instanceof Error ? err.message : String(err) },
+        ],
       });
       return await failRows(rowIds, {
         code: 'confirmation_failed',
@@ -281,10 +306,16 @@ async function attemptDeliverPrizes(
     console.log(
       `[delivery] Marked ${String(deliverableRowIds.length)} row(s) as offer_sent trade_offer_id=${idStr}`
     );
+    const winnerLabelSent = resolvePersonaName(ctx, partnerId64);
+    const sentItems = rows
+      .filter((r) => deliverableRowIds.includes(r.id))
+      .map((r) => `• ${r.item_name}`)
+      .join('\n') || '—';
     void notify('admin', {
-      title: 'Prize offer sent',
-      description: `Offer \`${idStr}\` sent to \`${partnerId64}\` with ${String(itemsToAttach.length)} item(s).`,
+      title: '📦 Oferta de premio enviada',
+      description: `Oferta enviada a **${winnerLabelSent}** con ${String(itemsToAttach.length)} item(s).`,
       color: Colors.Blue,
+      fields: [{ name: '🎮 Items', value: sentItems }],
     });
   } catch (err) {
     console.error(`[delivery] Failed to update DB after offer ${idStr}:`, err);

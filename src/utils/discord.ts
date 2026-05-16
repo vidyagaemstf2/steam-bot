@@ -13,7 +13,6 @@ export interface DiscordEmbed {
   description?: string;
   color?: number;
   fields?: DiscordEmbedField[];
-  timestamp?: string;
   footer?: { text: string };
 }
 
@@ -38,7 +37,7 @@ export async function notify(target: WebhookTarget, embed: DiscordEmbed): Promis
     await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ embeds: [{ ...embed, timestamp: embed.timestamp ?? new Date().toISOString() }] }),
+      body: JSON.stringify({ embeds: [embed] }),
     });
   } catch (err) {
     console.error(`[discord] Failed to post to ${target} webhook:`, err);

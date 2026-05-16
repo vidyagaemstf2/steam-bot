@@ -374,12 +374,14 @@ export async function approveDonationOffer(
   await markDonationApproved(pending, reviewer, currentItems);
 
   const donorLabel = pending.donor_name ?? pending.donor_steam_id;
-  const itemList = currentItems.map((i) => i.name).join(', ');
+  const bulletList = currentItems.map((i) => `• ${i.name}`).join('\n') || '—';
   void notify('donations', {
-    title: 'New donation received',
-    description: `**${donorLabel}** donated ${String(currentItems.length)} item(s).`,
+    title: '🎁 ¡Nueva donación recibida!',
+    description:
+      `¡Gracias **${donorLabel}** por donar ${String(currentItems.length)} item(s) al pool de premios! ` +
+      `Tu generosidad hace posibles los sorteos. 🙌`,
     color: Colors.Green,
-    fields: [{ name: 'Items', value: itemList || '—' }],
+    fields: [{ name: `🎮 Items donados (${String(currentItems.length)})`, value: bulletList }],
   });
   void notify('admin', {
     title: 'Donation approved',

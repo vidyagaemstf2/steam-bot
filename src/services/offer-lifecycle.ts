@@ -12,6 +12,18 @@ import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify } from '@/utils/discord.ts';
 
+function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
+  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
+    | Record<string, unknown>
+    | undefined;
+  if (!persona) return steamId64;
+  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
+    const v = persona[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return steamId64;
+}
+
 function getOffer(manager: SteamContext['tradeOfferManager'], id: string): Promise<TradeOffer> {
   return new Promise((resolve, reject) => {
     manager.getOffer(id, (err, offer) => {
@@ -59,10 +71,20 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       console.log(
         `[offer-lifecycle] Offer ${tid} accepted; marked delivered (${String(tracked.length)} row(s))`
       );
+      const winnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
+      const winnerLabel = resolvePersonaName(ctx, winnerId);
+      const deliveredItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       void notify('admin', {
-        title: 'Prize delivered',
-        description: `Offer \`${tid}\` was accepted. ${String(tracked.length)} row(s) marked delivered.`,
+        title: '✅ Premio entregado',
+        description: `La oferta a **${winnerLabel}** fue aceptada. ${String(tracked.length)} fila(s) marcadas como entregadas.`,
         color: Colors.Green,
+        fields: [{ name: '🎮 Items', value: deliveredItems }],
+      });
+      void notify('donations', {
+        title: '🏆 ¡Hay un ganador!',
+        description: `¡Felicitaciones **${winnerLabel}** por recibir ${String(tracked.length)} premio(s) del sorteo! 🎉`,
+        color: Colors.Green,
+        fields: [{ name: '🎮 Premio(s)', value: deliveredItems }],
       });
       if (env.REMOVE_FRIEND_AFTER_DELIVERY) {
         try {
@@ -86,23 +108,28 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       offer.state === S.CanceledBySecondFactor ||
       offer.state === S.Countered
     ) {
+      const endedWinnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
+      const endedWinnerLabel = resolvePersonaName(ctx, endedWinnerId);
+      const endedItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       if (offer.state === S.InvalidItems) {
         console.error(
           `[offer-lifecycle] Offer ${tid} InvalidItems; items no longer valid — not marking delivered, resetting to pending`
         );
         void notify('admin', {
-          title: 'Offer has invalid items',
-          description: `Offer \`${tid}\` ended with InvalidItems state. Reset to pending — admin review needed.`,
+          title: '❌ Items inválidos en la oferta',
+          description: `La oferta a **${endedWinnerLabel}** terminó con estado InvalidItems. Reseteada a pendiente — requiere revisión.`,
           color: Colors.Red,
+          fields: [{ name: '🎮 Items', value: endedItems }],
         });
       } else {
         console.log(
           `[offer-lifecycle] Offer ${tid} ended (state=${String(offer.state)}); resetting to pending`
         );
         void notify('admin', {
-          title: 'Prize offer ended',
-          description: `Offer \`${tid}\` ended with state \`${String(offer.state)}\`. Reset to pending.`,
+          title: '⚠️ Oferta de premio finalizada',
+          description: `La oferta a **${endedWinnerLabel}** terminó con estado \`${String(offer.state)}\`. Reseteada a pendiente.`,
           color: Colors.Yellow,
+          fields: [{ name: '🎮 Items', value: endedItems }],
         });
       }
       await resetOfferSentToPendingByTradeOfferId(tid);
