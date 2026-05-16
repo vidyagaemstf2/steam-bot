@@ -271,8 +271,9 @@ async function handleDeliveryRecord(
     return;
   }
 
+  const expiresAt = new Date(Date.now() + env.MANUAL_DELIVERY_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
   try {
-    await createPendingDelivery(steamId64, assetId.trim(), itemName.trim());
+    await createPendingDelivery(steamId64, assetId.trim(), itemName.trim(), expiresAt);
   } catch (err) {
     console.error('[api] Failed to record delivery:', err);
     sendJson(res, 500, { error: 'No se pudo registrar la entrega' });
