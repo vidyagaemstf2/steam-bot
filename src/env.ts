@@ -33,7 +33,11 @@ export const env = createEnv({
       .enum(['true', 'false'])
       .optional()
       .default('true')
-      .transform((v) => v === 'true')
+      .transform((v) => v === 'true'),
+    /** Discord webhook URL for the private admin/ops channel. */
+    DISCORD_WEBHOOK_ADMIN: z.string().url().optional(),
+    /** Discord webhook URL for the public donations announcement channel. */
+    DISCORD_WEBHOOK_DONATIONS: z.string().url().optional()
   },
   runtimeEnv,
   emptyStringAsUndefined: true

@@ -10,6 +10,7 @@ import {
 } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
+import { Colors, notify } from '@/utils/discord.ts';
 
 function getOffer(manager: SteamContext['tradeOfferManager'], id: string): Promise<TradeOffer> {
   return new Promise((resolve, reject) => {
@@ -58,6 +59,11 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       console.log(
         `[offer-lifecycle] Offer ${tid} accepted; marked delivered (${String(tracked.length)} row(s))`
       );
+      void notify('admin', {
+        title: 'Prize delivered',
+        description: `Offer \`${tid}\` was accepted. ${String(tracked.length)} row(s) marked delivered.`,
+        color: Colors.Green,
+      });
       if (env.REMOVE_FRIEND_AFTER_DELIVERY) {
         try {
           ctx.user.removeFriend(offer.partner);
@@ -84,10 +90,20 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
         console.error(
           `[offer-lifecycle] Offer ${tid} InvalidItems; items no longer valid — not marking delivered, resetting to pending`
         );
+        void notify('admin', {
+          title: 'Offer has invalid items',
+          description: `Offer \`${tid}\` ended with InvalidItems state. Reset to pending — admin review needed.`,
+          color: Colors.Red,
+        });
       } else {
         console.log(
           `[offer-lifecycle] Offer ${tid} ended (state=${String(offer.state)}); resetting to pending`
         );
+        void notify('admin', {
+          title: 'Prize offer ended',
+          description: `Offer \`${tid}\` ended with state \`${String(offer.state)}\`. Reset to pending.`,
+          color: Colors.Yellow,
+        });
       }
       await resetOfferSentToPendingByTradeOfferId(tid);
     }

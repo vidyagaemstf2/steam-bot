@@ -12,6 +12,7 @@ import {
 } from '@/services/offer-lifecycle.ts';
 import { registerIncomingTradePolicy } from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
+import { Colors, notify } from '@/utils/discord.ts';
 
 export { prisma, getSteamContext, shutdownSteam };
 
@@ -42,6 +43,11 @@ export function startBot(): void {
 
       const steamCtx = await connectSteam();
       console.log('[bot] Steam session ready.');
+      void notify('admin', {
+        title: 'Bot online',
+        description: 'Steam session established. All services starting.',
+        color: Colors.Green,
+      });
       await reconcileOfferSentOnStartup(steamCtx);
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
@@ -53,6 +59,11 @@ export function startBot(): void {
       await startApiServer(steamCtx);
     } catch (err) {
       console.error('[bot] Startup failed:', err);
+      await notify('admin', {
+        title: 'Bot startup failed',
+        description: err instanceof Error ? err.message : String(err),
+        color: Colors.Red,
+      });
       process.exit(1);
     }
   })();

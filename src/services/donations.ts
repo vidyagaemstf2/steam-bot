@@ -19,6 +19,7 @@ import type {
 import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
+import { Colors, notify } from '@/utils/discord.ts';
 
 type TradeItem = {
   appid?: number | string;
@@ -371,6 +372,21 @@ export async function approveDonationOffer(
 
   const currentItems = await reconcileAcceptedItems(ctx, items);
   await markDonationApproved(pending, reviewer, currentItems);
+
+  const donorLabel = pending.donor_name ?? pending.donor_steam_id;
+  const itemList = currentItems.map((i) => i.name).join(', ');
+  void notify('donations', {
+    title: 'New donation received',
+    description: `**${donorLabel}** donated ${String(currentItems.length)} item(s).`,
+    color: Colors.Green,
+    fields: [{ name: 'Items', value: itemList || '—' }],
+  });
+  void notify('admin', {
+    title: 'Donation approved',
+    description: `Offer \`${tradeOfferId}\` from **${donorLabel}** accepted by **${reviewer.reviewerName ?? reviewer.reviewerSteamId}**.`,
+    color: Colors.Blue,
+    fields: [{ name: 'Items', value: itemList || '—' }],
+  });
 }
 
 export async function rejectDonationOffer(
@@ -393,6 +409,14 @@ export async function rejectDonationOffer(
   }
 
   await markDonationRejected(tradeOfferId, reviewer);
+
+  const donorLabel = pending.donor_name ?? pending.donor_steam_id;
+  void notify('admin', {
+    title: 'Donation rejected',
+    description: `Offer \`${tradeOfferId}\` from **${donorLabel}** rejected by **${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'unknown'}**.`,
+    color: Colors.Yellow,
+    fields: reviewer.note ? [{ name: 'Note', value: reviewer.note }] : undefined,
+  });
 }
 
 export function registerDonationChat(ctx: SteamContext): void {

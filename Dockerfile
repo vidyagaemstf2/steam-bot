@@ -3,9 +3,9 @@
 # matches `pnpm start` and optional one-off `pnpm db:migrate:deploy` in the image.
 # For a smaller image later, move `tsx` to dependencies and/or emit compiled JS.
 
-FROM node:20-bookworm-slim AS base
+FROM node:22-bookworm AS base
 WORKDIR /app
-RUN corepack enable pnpm
+RUN npm install -g pnpm@9
 
 # Install deps + run postinstall (`prisma generate`). Do not set NODE_ENV=production here or
 # devDependencies (e.g. tsx, prisma) would be omitted.

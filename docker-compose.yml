@@ -1,0 +1,13 @@
+services:
+  bot:
+    image: vidya-steam-bot:latest
+    build: .
+    env_file: .env
+    ports:
+      - "${HOST_PORT:-3000}:${API_PORT:-3000}"
+    volumes:
+      - steam_data:/app/steam-data
+    restart: unless-stopped
+
+volumes:
+  steam_data:

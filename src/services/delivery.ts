@@ -8,6 +8,7 @@ import {
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
+import { Colors, notify } from '@/utils/discord.ts';
 
 type OfferItem = Parameters<TradeOffer['addMyItem']>[0];
 type DeliveryFailureCode =
@@ -201,6 +202,12 @@ async function attemptDeliverPrizes(
       message:
         'No encontre el item del premio en el inventario tradable del bot. Esto necesita que un admin lo revise.'
     });
+    void notify('admin', {
+      title: 'Prize item missing from inventory',
+      description: `Cannot deliver to \`${partnerId64}\` — item(s) not found in tradable inventory.`,
+      color: Colors.Red,
+      fields: [{ name: 'Missing asset IDs', value: missing.join(', ') }],
+    });
     if (itemsToAttach.length === 0) {
       return {
         ok: false,
@@ -255,6 +262,12 @@ async function attemptDeliverPrizes(
       console.log(`[delivery] Offer ${idStr} confirmed via STEAM_IDENTITY_SECRET`);
     } catch (err) {
       console.error(`[delivery] Failed to confirm offer ${idStr}:`, err);
+      void notify('admin', {
+        title: 'Trade offer confirmation failed',
+        description: `Offer \`${idStr}\` to \`${partnerId64}\` was created but mobile confirmation failed. Bot needs attention.`,
+        color: Colors.Red,
+        fields: [{ name: 'Error', value: err instanceof Error ? err.message : String(err) }],
+      });
       return await failRows(rowIds, {
         code: 'confirmation_failed',
         message:
@@ -268,6 +281,11 @@ async function attemptDeliverPrizes(
     console.log(
       `[delivery] Marked ${String(deliverableRowIds.length)} row(s) as offer_sent trade_offer_id=${idStr}`
     );
+    void notify('admin', {
+      title: 'Prize offer sent',
+      description: `Offer \`${idStr}\` sent to \`${partnerId64}\` with ${String(itemsToAttach.length)} item(s).`,
+      color: Colors.Blue,
+    });
   } catch (err) {
     console.error(`[delivery] Failed to update DB after offer ${idStr}:`, err);
     return await failRows(deliverableRowIds, {
