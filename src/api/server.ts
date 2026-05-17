@@ -8,11 +8,7 @@ import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-delive
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
 import { Colors, notify } from '@/utils/discord.ts';
-import {
-  approveDonationOffer,
-  createGameDonationSession,
-  rejectDonationOffer
-} from '@/services/donations.ts';
+import { approveDonationOffer, rejectDonationOffer } from '@/services/donations.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
@@ -371,41 +367,6 @@ async function handleAdminSend(
   });
 }
 
-async function handleDonationSession(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  let body: unknown;
-  try {
-    body = await readJsonBody(req);
-  } catch {
-    sendJson(res, 400, { error: 'Cuerpo invalido' });
-    return;
-  }
-  if (body === null || typeof body !== 'object') {
-    sendJson(res, 400, { error: 'Cuerpo invalido' });
-    return;
-  }
-
-  const { steamId64, donorName } = body as Record<string, unknown>;
-  if (typeof steamId64 !== 'string' || !isValidSteamId64(steamId64)) {
-    sendJson(res, 400, { error: 'SteamID64 invalido' });
-    return;
-  }
-  const cleanDonorName = typeof donorName === 'string' && donorName.trim() ? donorName.trim() : null;
-
-  try {
-    const session = await createGameDonationSession(steamId64, cleanDonorName);
-    sendJson(res, session.created ? 201 : 200, {
-      ok: true,
-      alreadyActive: !session.created,
-      expiresAt: session.expiresAt,
-      expiresInSeconds: session.expiresInSeconds
-    });
-  } catch (err) {
-    console.error('[api] Failed to create donation session:', err);
-    sendJson(res, 500, { error: 'No se pudo crear la ventana de donacion' });
-    return;
-  }
-}
-
 async function handlePendingDonations(res: ServerResponse, req: IncomingMessage): Promise<void> {
   try {
     const offers = await listPendingDonationOffers();
@@ -508,11 +469,6 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
 
   if (req.method === 'POST' && pathname === '/delivery/admin-send') {
     await handleAdminSend(ctx, req, res);
-    return;
-  }
-
-  if (req.method === 'POST' && pathname === '/donations/session') {
-    await handleDonationSession(req, res);
     return;
   }
 

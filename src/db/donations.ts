@@ -1,12 +1,5 @@
 import { prisma } from '@/db.ts';
-import type {
-  DonationOffer,
-  DonationOfferItem,
-  DonationSession,
-  PrizePoolItem
-} from '../../generated/prisma/client.ts';
-
-export type DonationSessionSource = 'game_command' | 'steam_dm';
+import type { DonationOffer, DonationOfferItem, PrizePoolItem } from '../../generated/prisma/client.ts';
 
 export type DonationItemInput = {
   appId: number;
@@ -28,111 +21,7 @@ export type PendingDonationOffer = DonationOffer & {
   items: DonationOfferItem[];
 };
 
-export type DonationSessionResult = {
-  session: DonationSession;
-  created: boolean;
-};
-
-const DONATION_SESSION_MS = 15 * 60 * 1000;
 const DONATION_APPROVAL_TRANSACTION_TIMEOUT_MS = 30_000;
-
-function expiryDate(now = new Date()): Date {
-  return new Date(now.getTime() + DONATION_SESSION_MS);
-}
-
-function activeDonationSessionKey(donorSteamId: string): string {
-  return donorSteamId;
-}
-
-function isUniqueConstraintError(err: unknown): boolean {
-  if (err === null || typeof err !== 'object') {
-    return false;
-  }
-  return (err as { code?: unknown }).code === 'P2002';
-}
-
-export async function expireOldDonationSessions(now = new Date()): Promise<void> {
-  await prisma.donationSession.updateMany({
-    where: {
-      status: 'active',
-      expires_at: { lt: now }
-    },
-    data: { status: 'expired' }
-  });
-  await prisma.donationSession.updateMany({
-    where: {
-      status: { not: 'active' },
-      active_session_key: { not: null }
-    },
-    data: { active_session_key: null }
-  });
-}
-
-export async function createDonationSession(
-  donorSteamId: string,
-  donorName: string | null,
-  source: DonationSessionSource
-): Promise<DonationSessionResult> {
-  const now = new Date();
-  await expireOldDonationSessions(now);
-  const existing = await findActiveDonationSession(donorSteamId);
-  if (existing) {
-    return { session: existing, created: false };
-  }
-
-  try {
-    const session = await prisma.donationSession.create({
-      data: {
-        donor_steam_id: donorSteamId,
-        active_session_key: activeDonationSessionKey(donorSteamId),
-        donor_name: donorName,
-        source,
-        status: 'active',
-        expires_at: expiryDate(now)
-      }
-    });
-    return { session, created: true };
-  } catch (err) {
-    if (isUniqueConstraintError(err)) {
-      const current = await findActiveDonationSession(donorSteamId);
-      if (current) {
-        return { session: current, created: false };
-      }
-    }
-    throw err;
-  }
-}
-
-export async function findActiveDonationSession(
-  donorSteamId: string
-): Promise<DonationSession | null> {
-  const now = new Date();
-  await expireOldDonationSessions(now);
-  return prisma.donationSession.findFirst({
-    where: {
-      donor_steam_id: donorSteamId,
-      status: 'active',
-      expires_at: { gte: now }
-    },
-    orderBy: { expires_at: 'desc' }
-  });
-}
-
-export async function hasActiveDonationSession(donorSteamId: string): Promise<boolean> {
-  const session = await findActiveDonationSession(donorSteamId);
-  return session !== null;
-}
-
-export async function markDonationSessionsUsed(donorSteamId: string): Promise<void> {
-  await prisma.donationSession.updateMany({
-    where: {
-      donor_steam_id: donorSteamId,
-      status: 'active',
-      expires_at: { gte: new Date() }
-    },
-    data: { status: 'used', active_session_key: null }
-  });
-}
 
 export async function recordDonationOffer(input: {
   tradeOfferId: string;

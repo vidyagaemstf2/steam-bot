@@ -1,7 +1,13 @@
 import { prisma } from '@/db.ts';
+import { env } from '@/env.ts';
 import type { PendingDelivery } from '../../generated/prisma/client.ts';
 
 const RESERVED_STATUSES = ['pending', 'offer_sent'] as const;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function defaultExpiry(): Date {
+  return new Date(Date.now() + env.MANUAL_DELIVERY_EXPIRY_DAYS * MS_PER_DAY);
+}
 
 export type DeliveryFailureInput = {
   code: string;
@@ -199,6 +205,8 @@ export async function createPendingDelivery(
     return existing;
   }
 
+  const effectiveExpiry = expiresAt ?? defaultExpiry();
+
   try {
     return await prisma.pendingDelivery.create({
       data: {
@@ -207,7 +215,7 @@ export async function createPendingDelivery(
         active_reservation_key: activeReservationKey(winnerSteamId, normalizedAssetId),
         item_name: itemName,
         status: 'pending',
-        expires_at: expiresAt ?? null
+        expires_at: effectiveExpiry
       }
     });
   } catch (err) {

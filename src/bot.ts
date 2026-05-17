@@ -4,7 +4,6 @@ import { cancelExpiredDeliveries } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { registerClaimChat } from '@/services/claim-chat.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
-import { registerDonationChat } from '@/services/donations.ts';
 import { registerFriendGating } from '@/services/friends.ts';
 import { registerHelpChat } from '@/services/help-chat.ts';
 import {
@@ -78,7 +77,6 @@ export function startBot(): void {
       registerOutboundDelivery(steamCtx);
       registerHelpChat(steamCtx);
       registerClaimChat(steamCtx);
-      registerDonationChat(steamCtx);
       registerOfferLifecycle(steamCtx);
       registerIncomingTradePolicy(steamCtx);
       await startApiServer(steamCtx);

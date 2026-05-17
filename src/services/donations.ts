@@ -1,217 +1,43 @@
-import TradeOfferManager from 'steam-tradeoffer-manager';
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
+import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
-  createDonationSession,
-  findActiveDonationSession,
   findPendingDonationOffer,
-  hasActiveDonationSession,
   markDonationAcceptedFailed,
   markDonationApproved,
   markDonationRejected,
-  markDonationSessionsUsed,
-  recordDonationOffer
+  recordDonationOffer,
+  type DonationItemInput,
+  type DonationReviewerInput,
+  type PendingDonationOffer
 } from '@/db/donations.ts';
-import type {
-  DonationItemInput,
-  DonationReviewerInput,
-  PendingDonationOffer
-} from '@/db/donations.ts';
-import { TF2_APP_ID, TF2_CONTEXT_ID } from '@/steam/session.ts';
+import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
+import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 import { Colors, notify } from '@/utils/discord.ts';
 
-type TradeItem = {
-  appid?: number | string;
-  contextid?: number | string;
-  assetid?: number | string;
-  id?: number | string;
-  classid?: number | string;
-  instanceid?: number | string;
-  market_name?: string;
-  name?: string;
-  icon_url?: string;
-  getImageURL?: () => string;
-};
+const DONATION_KEYWORDS = ['!donar', '!donate'];
 
-type SteamIdLike = {
-  getSteamID64: () => string;
-};
-
-const DONATION_COMMANDS = new Set(['!donate', '!donar']);
-let donationChatRegistered = false;
-
-export type DonationSessionView = {
-  created: boolean;
-  expiresAt: Date;
-  expiresInSeconds: number;
-};
-
-function secondsUntil(date: Date): number {
-  return Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
-}
-
-function includesDonationCommand(message: string | null): boolean {
-  return (message ?? '')
-    .toLowerCase()
-    .split(/\s+/)
-    .some((token) => DONATION_COMMANDS.has(token));
-}
-
-function offerMessage(offer: TradeOffer): string | null {
-  const raw = (offer as { message?: unknown }).message;
-  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null;
-}
-
-function tradeItemAssetId(item: TradeItem): string {
-  return String(item.assetid ?? item.id ?? '').trim();
-}
-
-function tradeItemAppId(item: TradeItem): number {
-  const n = Number(item.appid ?? TF2_APP_ID);
-  return Number.isFinite(n) ? n : TF2_APP_ID;
-}
-
-function tradeItemContextId(item: TradeItem): string {
-  return String(item.contextid ?? TF2_CONTEXT_ID).trim();
-}
-
-function tradeItemName(item: TradeItem): string {
-  const name = item.market_name ?? item.name;
-  return typeof name === 'string' && name.trim().length > 0 ? name.trim() : 'Unknown item';
-}
-
-function tradeItemIconUrl(item: TradeItem): string | null {
-  if (typeof item.getImageURL === 'function') {
-    try {
-      return item.getImageURL();
-    } catch {
-      return null;
+function hasDonationKeyword(message: string | null | undefined): boolean {
+  if (!message) {
+    return false;
+  }
+  const lower = message.toLowerCase();
+  return DONATION_KEYWORDS.some((kw) => {
+    const idx = lower.indexOf(kw);
+    if (idx === -1) {
+      return false;
     }
-  }
-  return typeof item.icon_url === 'string' && item.icon_url.length > 0 ? item.icon_url : null;
+    const charBefore = lower[idx - 1];
+    const charAfter = lower[idx + kw.length];
+    const before = idx === 0 || charBefore === undefined || /\s/.test(charBefore);
+    const after = charAfter === undefined || /\s/.test(charAfter);
+    return before && after;
+  });
 }
 
-function personaDisplayName(persona: unknown): string | null {
-  if (persona === null || typeof persona !== 'object') {
-    return null;
-  }
-  const obj = persona as Record<string, unknown>;
-  const candidates = [obj.persona_name, obj.player_name, obj.personaName, obj.name];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim().length > 0) {
-      return candidate.trim();
-    }
-  }
-  return null;
-}
-
-async function resolveSteamDisplayName(
-  ctx: SteamContext,
-  steamId64: string,
-  fallback: string | null
-): Promise<string | null> {
-  const cached = personaDisplayName(ctx.user.users[steamId64]);
-  if (cached) {
-    return cached;
-  }
-
-  try {
-    const { personas } = await ctx.user.getPersonas([steamId64]);
-    const resolved = personaDisplayName(personas[steamId64]);
-    if (resolved) {
-      return resolved;
-    }
-  } catch (err) {
-    console.error(`[donations] Failed to resolve Steam persona for ${steamId64}:`, err);
-  }
-
-  return fallback;
-}
-
-function mapDonationItems(items: unknown[]): DonationItemInput[] {
-  const mapped: DonationItemInput[] = [];
-  for (const raw of items) {
-    const item = raw as TradeItem;
-    const assetId = tradeItemAssetId(item);
-    if (!assetId) {
-      continue;
-    }
-    mapped.push({
-      appId: tradeItemAppId(item),
-      contextId: tradeItemContextId(item),
-      assetId,
-      classId: item.classid === undefined ? null : String(item.classid),
-      instanceId: item.instanceid === undefined ? null : String(item.instanceid),
-      name: tradeItemName(item),
-      iconUrl: tradeItemIconUrl(item)
-    });
-  }
-  return mapped;
-}
-
-function allItemsAreTf2(items: DonationItemInput[]): boolean {
-  return items.every(
-    (item) => item.appId === TF2_APP_ID && item.contextId === String(TF2_CONTEXT_ID)
-  );
-}
-
-function pendingOfferItemsToDonationItems(items: PendingDonationOffer['items']): DonationItemInput[] {
-  return items.map((item) => ({
-    appId: item.app_id,
-    contextId: item.context_id,
-    assetId: item.asset_id,
-    classId: item.class_id,
-    instanceId: item.instance_id,
-    name: item.name,
-    iconUrl: item.icon_url
-  }));
-}
-
-function itemIdentityKey(item: DonationItemInput): string {
-  return `${item.classId ?? ''}:${item.instanceId ?? ''}:${item.name}`;
-}
-
-async function reconcileAcceptedItems(
-  ctx: SteamContext,
-  donatedItems: DonationItemInput[]
-): Promise<DonationItemInput[]> {
-  try {
-    const sid = ctx.user.steamID;
-    if (!sid) {
-      throw new Error('Steam user has no steamID yet');
-    }
-    const inventory = mapDonationItems(
-      await loadTf2InventoryViaCommunity(ctx.community, sid.getSteamID64())
-    );
-    const used = new Set<string>();
-    return donatedItems.map((donated) => {
-      const exact = inventory.find((item) => item.assetId === donated.assetId && !used.has(item.assetId));
-      if (exact) {
-        used.add(exact.assetId);
-        return { ...exact, name: donated.name };
-      }
-
-      const donatedKey = itemIdentityKey(donated);
-      const matched = inventory.find(
-        (item) => itemIdentityKey(item) === donatedKey && !used.has(item.assetId)
-      );
-      if (matched) {
-        used.add(matched.assetId);
-        return { ...matched, name: donated.name };
-      }
-
-      return donated;
-    });
-  } catch (err) {
-    console.error('[donations] Failed to reconcile accepted donation items:', err);
-    return donatedItems;
-  }
-}
-
-function getOffer(manager: SteamContext['tradeOfferManager'], tradeOfferId: string): Promise<TradeOffer> {
+function getOffer(manager: SteamContext['tradeOfferManager'], id: string): Promise<TradeOffer> {
   return new Promise((resolve, reject) => {
-    manager.getOffer(tradeOfferId, (err, offer) => {
+    manager.getOffer(id, (err, offer) => {
       if (err) {
         reject(err);
       } else {
@@ -245,78 +71,61 @@ function declineOffer(offer: TradeOffer): Promise<void> {
   });
 }
 
-export async function createGameDonationSession(
-  donorSteamId: string,
-  donorName: string | null
-): Promise<DonationSessionView> {
-  const result = await createDonationSession(donorSteamId, donorName, 'game_command');
-  return {
-    created: result.created,
-    expiresAt: result.session.expires_at,
-    expiresInSeconds: secondsUntil(result.session.expires_at)
-  };
-}
-
-export async function createSteamDonationSession(
-  donorSteamId: string,
-  donorName: string | null
-): Promise<DonationSessionView> {
-  const result = await createDonationSession(donorSteamId, donorName, 'steam_dm');
-  return {
-    created: result.created,
-    expiresAt: result.session.expires_at,
-    expiresInSeconds: secondsUntil(result.session.expires_at)
-  };
-}
-
-export async function shouldAllowDonationFriendRequest(donorSteamId: string): Promise<boolean> {
-  return hasActiveDonationSession(donorSteamId);
-}
+type OfferItem = {
+  appid: number;
+  contextid: string;
+  assetid: string;
+  classid?: string | null;
+  instanceid?: string | null;
+  market_hash_name?: string;
+  market_name?: string;
+  name?: string;
+  getImageURL?: () => string;
+};
 
 export async function tryRecordIncomingDonationOffer(
   offer: TradeOffer,
-  ctx: SteamContext
-): Promise<boolean> {
-  const donorSteamId = offer.partner.getSteamID64();
-  const message = offerMessage(offer);
-  const offerId = offer.id;
-  if (offerId === null || offerId === undefined) {
-    throw new Error('La oferta de donacion no tiene ID de oferta de intercambio');
+  _ctx: SteamContext
+): Promise<PendingDonationOffer | null> {
+  const offerData = offer as unknown as { message?: string | null; itemsToReceive?: OfferItem[] };
+  const message = offerData.message ?? null;
+
+  if (!hasDonationKeyword(message)) {
+    return null;
   }
 
-  const existingPending = await findPendingDonationOffer(String(offerId));
-  if (existingPending) {
-    return true;
-  }
-
-  const activeSession = await findActiveDonationSession(donorSteamId);
-  const hasDonationIntent = includesDonationCommand(message) || activeSession !== null;
-
-  if (!hasDonationIntent) {
-    return false;
-  }
-
-  if (offer.itemsToGive.length > 0) {
-    throw new Error('La oferta de donacion pide items del bot');
-  }
-
-  const items = mapDonationItems(offer.itemsToReceive as unknown[]);
+  const items: OfferItem[] = offerData.itemsToReceive ?? [];
   if (items.length === 0) {
-    throw new Error('La oferta de donacion no tiene items recibidos utilizables');
-  }
-  if (!allItemsAreTf2(items)) {
-    throw new Error('La oferta de donacion incluye items que no son de TF2');
+    throw new Error('Donation offer contains no items to receive');
   }
 
-  await recordDonationOffer({
-    tradeOfferId: String(offerId),
-    donorSteamId,
-    donorName: await resolveSteamDisplayName(ctx, donorSteamId, activeSession?.donor_name ?? null),
+  const nonTf2 = items.filter((item) => item.appid !== TF2_APP_ID);
+  if (nonTf2.length > 0) {
+    throw new Error(
+      `Donation offer contains non-TF2 items (appid ${String(nonTf2[0]?.appid ?? 'unknown')})`
+    );
+  }
+
+  const steamId = offer.partner.getSteamID64();
+  const offerId = String(offer.id ?? 'unknown');
+
+  const donationItems: DonationItemInput[] = items.map((item) => ({
+    appId: item.appid,
+    contextId: item.contextid,
+    assetId: item.assetid,
+    classId: item.classid ?? null,
+    instanceId: item.instanceid ?? null,
+    name: item.market_hash_name ?? item.market_name ?? item.name ?? '',
+    iconUrl: item.getImageURL ? item.getImageURL() : null
+  }));
+
+  return recordDonationOffer({
+    tradeOfferId: offerId,
+    donorSteamId: steamId,
+    donorName: null,
     message,
-    items
+    items: donationItems
   });
-  await markDonationSessionsUsed(donorSteamId);
-  return true;
 }
 
 export async function approveDonationOffer(
@@ -324,70 +133,72 @@ export async function approveDonationOffer(
   tradeOfferId: string,
   reviewer: DonationReviewerInput
 ): Promise<void> {
-  const pending = await findPendingDonationOffer(tradeOfferId);
-  if (!pending) {
-    throw new Error('La oferta de donacion no esta pendiente de revision');
+  const pendingOffer = await findPendingDonationOffer(tradeOfferId);
+  if (!pendingOffer) {
+    throw new Error(`No pending donation offer found for trade offer ID ${tradeOfferId}`);
   }
 
-  let offer: TradeOffer;
+  let steamOffer: TradeOffer;
   try {
-    offer = await getOffer(ctx.tradeOfferManager, tradeOfferId);
+    steamOffer = await getOffer(ctx.tradeOfferManager, tradeOfferId);
   } catch (err) {
-    await markDonationAcceptedFailed(tradeOfferId, reviewer, String(err));
-    throw err;
+    const reason = err instanceof Error ? err.message : String(err);
+    await markDonationAcceptedFailed(
+      tradeOfferId,
+      reviewer,
+      `Failed to fetch trade offer: ${reason}`
+    );
+    throw new Error(`Failed to fetch trade offer ${tradeOfferId}: ${reason}`);
   }
 
-  const offerAlreadyAccepted = offer.state === TradeOfferManager.ETradeOfferState.Accepted;
-  if (offer.state !== TradeOfferManager.ETradeOfferState.Active && !offerAlreadyAccepted) {
-    const reason = `La oferta de Steam no esta activa (estado=${String(offer.state)})`;
+  const S = TradeOfferManager.ETradeOfferState;
+  if (steamOffer.state !== S.Active) {
+    const reason = `Trade offer is not active (state: ${String(steamOffer.state)})`;
     await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
     throw new Error(reason);
   }
 
-  if (offer.itemsToGive.length > 0) {
-    const reason = 'La oferta de donacion pide items del bot';
-    await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
-    throw new Error(reason);
+  try {
+    await acceptOffer(steamOffer);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    await markDonationAcceptedFailed(tradeOfferId, reviewer, `Accept failed: ${reason}`);
+    throw new Error(`Failed to accept trade offer ${tradeOfferId}: ${reason}`);
   }
 
-  const offerItems = mapDonationItems(offer.itemsToReceive as unknown[]);
-  const items = offerItems.length > 0 ? offerItems : pendingOfferItemsToDonationItems(pending.items);
-  if (items.length === 0 || !allItemsAreTf2(items)) {
-    const reason = 'La oferta de donacion no tiene items de TF2 aceptables';
-    await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
-    throw new Error(reason);
+  const offerId = String(steamOffer.id ?? tradeOfferId);
+  try {
+    await confirmTradeOfferWithRetries(ctx.community, ctx.identitySecret, offerId, {
+      logPrefix: '[donations]'
+    });
+  } catch (err) {
+    console.error(
+      `[donations] Mobile confirmation failed for offer ${offerId}:`,
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
-  if (offerAlreadyAccepted) {
-    console.log(`[donations] Donation offer ${tradeOfferId} was already accepted; finalizing DB state`);
-  } else {
-    try {
-      const status = await acceptOffer(offer);
-      console.log(`[donations] Accepted donation offer ${tradeOfferId} (status: ${status})`);
-    } catch (err) {
-      await markDonationAcceptedFailed(tradeOfferId, reviewer, String(err));
-      throw err;
-    }
-  }
+  const prizeItems: DonationItemInput[] = pendingOffer.items.map((item) => ({
+    appId: item.app_id,
+    contextId: item.context_id,
+    assetId: item.asset_id,
+    classId: item.class_id ?? null,
+    instanceId: item.instance_id ?? null,
+    name: item.name,
+    iconUrl: item.icon_url ?? null
+  }));
 
-  const currentItems = await reconcileAcceptedItems(ctx, items);
-  await markDonationApproved(pending, reviewer, currentItems);
+  await markDonationApproved(pendingOffer, reviewer, prizeItems);
 
-  const donorLabel = pending.donor_name ?? pending.donor_steam_id;
-  const bulletList = currentItems.map((i) => `• ${i.name}`).join('\n') || '—';
   void notify('donations', {
-    title: '🎁 ¡Nueva donación recibida!',
-    description:
-      `¡Gracias **${donorLabel}** por donar ${String(currentItems.length)} item(s) al pool de premios! ` +
-      `Tu generosidad hace posibles los sorteos. 🙌`,
+    title: 'Donación aprobada',
+    description: `Oferta de **${pendingOffer.donor_name ?? pendingOffer.donor_steam_id}** aprobada por ${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'admin'}.`,
     color: Colors.Green,
-    fields: [{ name: `🎮 Items donados (${String(currentItems.length)})`, value: bulletList }],
-  });
-  void notify('admin', {
-    title: 'Donation approved',
-    description: `Offer \`${tradeOfferId}\` from **${donorLabel}** accepted by **${reviewer.reviewerName ?? reviewer.reviewerSteamId}**.`,
-    color: Colors.Blue,
-    fields: [{ name: 'Items', value: itemList || '—' }],
+    fields: pendingOffer.items.map((item) => ({
+      name: item.name,
+      value: item.asset_id,
+      inline: true
+    }))
   });
 }
 
@@ -396,63 +207,29 @@ export async function rejectDonationOffer(
   tradeOfferId: string,
   reviewer: DonationReviewerInput
 ): Promise<void> {
-  const pending = await findPendingDonationOffer(tradeOfferId);
-  if (!pending) {
-    throw new Error('La oferta de donacion no esta pendiente de revision');
+  const pendingOffer = await findPendingDonationOffer(tradeOfferId);
+  if (!pendingOffer) {
+    throw new Error(`No pending donation offer found for trade offer ID ${tradeOfferId}`);
   }
 
   try {
-    const offer = await getOffer(ctx.tradeOfferManager, tradeOfferId);
-    if (offer.state === TradeOfferManager.ETradeOfferState.Active) {
-      await declineOffer(offer);
+    const steamOffer = await getOffer(ctx.tradeOfferManager, tradeOfferId);
+    const S = TradeOfferManager.ETradeOfferState;
+    if (steamOffer.state === S.Active) {
+      await declineOffer(steamOffer);
     }
   } catch (err) {
-    console.error(`[donations] Failed to decline donation offer ${tradeOfferId}:`, err);
+    console.error(
+      `[donations] Failed to decline Steam offer ${tradeOfferId} during rejection:`,
+      err instanceof Error ? err.message : String(err)
+    );
   }
 
   await markDonationRejected(tradeOfferId, reviewer);
 
-  const donorLabel = pending.donor_name ?? pending.donor_steam_id;
-  void notify('admin', {
-    title: 'Donation rejected',
-    description: `Offer \`${tradeOfferId}\` from **${donorLabel}** rejected by **${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'unknown'}**.`,
-    color: Colors.Yellow,
-    fields: reviewer.note ? [{ name: 'Note', value: reviewer.note }] : undefined,
-  });
-}
-
-export function registerDonationChat(ctx: SteamContext): void {
-  if (donationChatRegistered) {
-    return;
-  }
-  donationChatRegistered = true;
-
-  ctx.user.chat.on('friendMessage', (msg) => {
-    if (msg.local_echo) {
-      return;
-    }
-
-    const raw = (msg.message_no_bbcode ?? msg.message).trim();
-    const firstToken = raw.split(/\s+/)[0]?.toLowerCase() ?? '';
-    if (!DONATION_COMMANDS.has(firstToken)) {
-      return;
-    }
-
-    const friendSid = msg.steamid_friend as SteamIdLike;
-    const donorSteamId = friendSid.getSteamID64();
-
-    void (async () => {
-      const donorName = await resolveSteamDisplayName(ctx, donorSteamId, null);
-      const session = await createSteamDonationSession(donorSteamId, donorName);
-      const prefix = session.created
-        ? 'Ventana de donacion abierta por 15 minutos.'
-        : `Ya tenes una ventana de donacion abierta por unos ${String(session.expiresInSeconds)} segundos mas.`;
-      await ctx.user.chat.sendFriendMessage(
-        donorSteamId,
-        `${prefix} Mandame una oferta con solo items de TF2 para donar. Si mandas una oferta directa sin ventana activa, inclui !donar o !donate en el mensaje. Un admin la va a revisar antes de que yo la acepte.`
-      );
-    })().catch((err: unknown) => {
-      console.error(`[donations] Error handling !donate from ${donorSteamId}:`, err);
-    });
+  void notify('donations', {
+    title: 'Donación rechazada',
+    description: `Oferta de **${pendingOffer.donor_name ?? pendingOffer.donor_steam_id}** rechazada por ${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'admin'}.`,
+    color: Colors.Red
   });
 }
