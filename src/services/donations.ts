@@ -230,15 +230,20 @@ export async function approveDonationOffer(
   const reviewerLinkApprove = reviewer.reviewerSteamId
     ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
     : (reviewer.reviewerName ?? 'admin');
+  const itemCount = pendingOffer.items.length;
+  const itemList = pendingOffer.items.map((item) => `• ${item.name}`).join('\n') || '—';
+
   void notify('donations', {
+    title: '🎁 ¡Nueva donación recibida!',
+    description: `¡Gracias **${donorLinkApprove}** por donar ${String(itemCount)} item(s) al pool de premios! Tu generosidad hace posibles los sorteos. 🙌`,
+    color: Colors.Green,
+    fields: [{ name: `🎮 Items donados (${String(itemCount)})`, value: itemList }]
+  });
+  void notify('admin', {
     title: 'Donación aprobada',
     description: `Oferta de **${donorLinkApprove}** aprobada por ${reviewerLinkApprove}.`,
     color: Colors.Green,
-    fields: pendingOffer.items.map((item) => ({
-      name: item.name,
-      value: item.asset_id,
-      inline: true
-    }))
+    fields: [{ name: `🎮 Items donados (${String(itemCount)})`, value: itemList }]
   });
 }
 
@@ -274,7 +279,7 @@ export async function rejectDonationOffer(
   const reviewerLinkReject = reviewer.reviewerSteamId
     ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
     : (reviewer.reviewerName ?? 'admin');
-  void notify('donations', {
+  void notify('admin', {
     title: 'Donación rechazada',
     description: `Oferta de **${donorLinkReject}** rechazada por ${reviewerLinkReject}.`,
     color: Colors.Red
