@@ -10,7 +10,7 @@ import {
 } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { Colors, notify } from '@/utils/discord.ts';
+import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
 function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
   const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
@@ -76,13 +76,13 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       const deliveredItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       void notify('admin', {
         title: '✅ Premio entregado',
-        description: `La oferta a **${winnerLabel}** fue aceptada. ${String(tracked.length)} fila(s) marcadas como entregadas.`,
+        description: `La oferta a **${steamProfileLink(winnerLabel, winnerId)}** fue aceptada. ${String(tracked.length)} fila(s) marcadas como entregadas.`,
         color: Colors.Green,
         fields: [{ name: '🎮 Items', value: deliveredItems }],
       });
       void notify('donations', {
         title: '🏆 ¡Hay un ganador!',
-        description: `¡Felicitaciones **${winnerLabel}** por recibir ${String(tracked.length)} premio(s) del sorteo! 🎉`,
+        description: `¡Felicitaciones **${steamProfileLink(winnerLabel, winnerId)}** por recibir ${String(tracked.length)} premio(s) del sorteo! 🎉`,
         color: Colors.Green,
         fields: [{ name: '🎮 Premio(s)', value: deliveredItems }],
       });
@@ -117,7 +117,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
         );
         void notify('admin', {
           title: '❌ Items inválidos en la oferta',
-          description: `La oferta a **${endedWinnerLabel}** terminó con estado InvalidItems. Reseteada a pendiente — requiere revisión.`,
+          description: `La oferta a **${steamProfileLink(endedWinnerLabel, endedWinnerId)}** terminó con estado InvalidItems. Reseteada a pendiente — requiere revisión.`,
           color: Colors.Red,
           fields: [{ name: '🎮 Items', value: endedItems }],
         });
@@ -127,7 +127,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
         );
         void notify('admin', {
           title: '⚠️ Oferta de premio finalizada',
-          description: `La oferta a **${endedWinnerLabel}** terminó con estado \`${String(offer.state)}\`. Reseteada a pendiente.`,
+          description: `La oferta a **${steamProfileLink(endedWinnerLabel, endedWinnerId)}** terminó con estado \`${String(offer.state)}\`. Reseteada a pendiente.`,
           color: Colors.Yellow,
           fields: [{ name: '🎮 Items', value: endedItems }],
         });

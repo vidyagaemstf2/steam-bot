@@ -12,7 +12,7 @@ import {
 } from '@/services/offer-lifecycle.ts';
 import { registerIncomingTradePolicy } from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
-import { Colors, notify } from '@/utils/discord.ts';
+import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
 export { prisma, getSteamContext, shutdownSteam };
 
@@ -28,8 +28,8 @@ async function runExpirySweep(): Promise<void> {
       description: `${String(cancelled.length)} delivery row(s) were auto-cancelled due to expiry.`,
       color: Colors.Yellow,
       fields: cancelled.map((r) => ({
-        name: r.winner_steam_id,
-        value: r.item_name,
+        name: r.item_name,
+        value: steamProfileLink(r.winner_steam_id, r.winner_steam_id),
         inline: true
       }))
     });
