@@ -83,9 +83,32 @@ type OfferItem = {
   getImageURL?: () => string;
 };
 
+function readCachedPersonaName(ctx: SteamContext, steamId64: string): string | null {
+  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
+    | Record<string, unknown>
+    | undefined;
+  if (!persona) return null;
+  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
+    const v = persona[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return null;
+}
+
+async function resolveDonorName(ctx: SteamContext, steamId64: string): Promise<string | null> {
+  const cached = readCachedPersonaName(ctx, steamId64);
+  if (cached) return cached;
+
+  await new Promise<void>((resolve) => {
+    ctx.user.getPersonas([steamId64], () => resolve());
+  });
+
+  return readCachedPersonaName(ctx, steamId64);
+}
+
 export async function tryRecordIncomingDonationOffer(
   offer: TradeOffer,
-  _ctx: SteamContext
+  ctx: SteamContext
 ): Promise<PendingDonationOffer | null> {
   const offerData = offer as unknown as { message?: string | null; itemsToReceive?: OfferItem[] };
   const message = offerData.message ?? null;
@@ -109,6 +132,16 @@ export async function tryRecordIncomingDonationOffer(
   const steamId = offer.partner.getSteamID64();
   const offerId = String(offer.id ?? 'unknown');
 
+  let donorName: string | null = null;
+  try {
+    donorName = await resolveDonorName(ctx, steamId);
+  } catch (err) {
+    console.warn(
+      `[donations] Could not resolve persona name for ${steamId}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+
   const donationItems: DonationItemInput[] = items.map((item) => ({
     appId: item.appid,
     contextId: item.contextid,
@@ -122,7 +155,7 @@ export async function tryRecordIncomingDonationOffer(
   return recordDonationOffer({
     tradeOfferId: offerId,
     donorSteamId: steamId,
-    donorName: null,
+    donorName,
     message,
     items: donationItems
   });
