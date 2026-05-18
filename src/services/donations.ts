@@ -13,7 +13,7 @@ import {
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { Colors, notify } from '@/utils/discord.ts';
+import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
 const DONATION_KEYWORDS = ['!donar', '!donate'];
 
@@ -190,9 +190,16 @@ export async function approveDonationOffer(
 
   await markDonationApproved(pendingOffer, reviewer, prizeItems);
 
+  const donorLinkApprove = steamProfileLink(
+    pendingOffer.donor_name ?? pendingOffer.donor_steam_id,
+    pendingOffer.donor_steam_id
+  );
+  const reviewerLinkApprove = reviewer.reviewerSteamId
+    ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
+    : (reviewer.reviewerName ?? 'admin');
   void notify('donations', {
     title: 'Donación aprobada',
-    description: `Oferta de **${pendingOffer.donor_name ?? pendingOffer.donor_steam_id}** aprobada por ${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'admin'}.`,
+    description: `Oferta de **${donorLinkApprove}** aprobada por ${reviewerLinkApprove}.`,
     color: Colors.Green,
     fields: pendingOffer.items.map((item) => ({
       name: item.name,
@@ -227,9 +234,16 @@ export async function rejectDonationOffer(
 
   await markDonationRejected(tradeOfferId, reviewer);
 
+  const donorLinkReject = steamProfileLink(
+    pendingOffer.donor_name ?? pendingOffer.donor_steam_id,
+    pendingOffer.donor_steam_id
+  );
+  const reviewerLinkReject = reviewer.reviewerSteamId
+    ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
+    : (reviewer.reviewerName ?? 'admin');
   void notify('donations', {
     title: 'Donación rechazada',
-    description: `Oferta de **${pendingOffer.donor_name ?? pendingOffer.donor_steam_id}** rechazada por ${reviewer.reviewerName ?? reviewer.reviewerSteamId ?? 'admin'}.`,
+    description: `Oferta de **${donorLinkReject}** rechazada por ${reviewerLinkReject}.`,
     color: Colors.Red
   });
 }

@@ -7,7 +7,7 @@ import { listPendingDonationOffers, listPrizePoolItemsByAssetIds } from '@/db/do
 import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
-import { Colors, notify } from '@/utils/discord.ts';
+import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 import { approveDonationOffer, rejectDonationOffer } from '@/services/donations.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
@@ -350,7 +350,7 @@ async function handleAdminSend(
 
   void notify('admin', {
     title: 'Manual delivery queued',
-    description: `${String(items.length)} item(s) queued for \`${winnerSteamId}\`. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
+    description: `${String(items.length)} item(s) queued for ${steamProfileLink(winnerSteamId, winnerSteamId)}. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
     color: Colors.Blue,
     fields: (items as Record<string, unknown>[]).map((it) => ({
       name: (it.assetId as string).trim(),

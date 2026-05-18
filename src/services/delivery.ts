@@ -8,7 +8,7 @@ import {
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
-import { Colors, notify } from '@/utils/discord.ts';
+import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
 type OfferItem = Parameters<TradeOffer['addMyItem']>[0];
 type DeliveryFailureCode =
@@ -221,7 +221,7 @@ async function attemptDeliverPrizes(
       .join('\n') || missing.join('\n');
     void notify('admin', {
       title: '⚠️ Items faltantes en inventario',
-      description: `No se pudo entregar a **${winnerLabel}** — item(s) no encontrados en el inventario tradable.`,
+      description: `No se pudo entregar a **${steamProfileLink(winnerLabel, partnerId64)}** — item(s) no encontrados en el inventario tradable.`,
       color: Colors.Red,
       fields: [{ name: 'Items faltantes', value: missingNames }],
     });
@@ -286,7 +286,7 @@ async function attemptDeliverPrizes(
         .join('\n') || '—';
       void notify('admin', {
         title: '❌ Confirmación móvil fallida',
-        description: `La oferta a **${winnerLabelConf}** fue creada pero la confirmación móvil falló. El bot necesita atención.`,
+        description: `La oferta a **${steamProfileLink(winnerLabelConf, partnerId64)}** fue creada pero la confirmación móvil falló. El bot necesita atención.`,
         color: Colors.Red,
         fields: [
           { name: 'Items', value: confItems },
@@ -313,7 +313,7 @@ async function attemptDeliverPrizes(
       .join('\n') || '—';
     void notify('admin', {
       title: '📦 Oferta de premio enviada',
-      description: `Oferta enviada a **${winnerLabelSent}** con ${String(itemsToAttach.length)} item(s).`,
+      description: `Oferta enviada a **${steamProfileLink(winnerLabelSent, partnerId64)}** con ${String(itemsToAttach.length)} item(s).`,
       color: Colors.Blue,
       fields: [{ name: '🎮 Items', value: sentItems }],
     });

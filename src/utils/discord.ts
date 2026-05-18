@@ -23,6 +23,10 @@ export const Colors = {
   Blue: 0x5865f2,
 } as const;
 
+export function steamProfileLink(label: string, steamId64: string): string {
+  return `[${label}](https://steamcommunity.com/profiles/${steamId64})`;
+}
+
 function resolveUrl(target: WebhookTarget): string | undefined {
   return target === 'admin' ? env.DISCORD_WEBHOOK_ADMIN : env.DISCORD_WEBHOOK_DONATIONS;
 }
