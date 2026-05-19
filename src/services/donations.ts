@@ -83,6 +83,88 @@ type OfferItem = {
   getImageURL?: () => string;
 };
 
+type ExchangeReceiptItem = {
+  assetid?: string;
+  id?: string;
+  new_assetid?: string;
+};
+
+type TradeOfferWithExchangeDetails = {
+  getExchangeDetails: (
+    getDetailsIfFailed: boolean,
+    callback: (
+      err: Error | null,
+      status: unknown,
+      tradeInitTime: unknown,
+      receivedItems: ExchangeReceiptItem[]
+    ) => void
+  ) => void;
+};
+
+const EXCHANGE_DETAIL_ATTEMPTS = 4;
+const EXCHANGE_DETAIL_DELAY_MS = 5_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getExchangeDetailsOnce(
+  offer: TradeOffer
+): Promise<{ map: Map<string, string>; err: string | null }> {
+  return new Promise((resolve) => {
+    (offer as unknown as TradeOfferWithExchangeDetails).getExchangeDetails(
+      false,
+      (err, _status, _tradeInitTime, receivedItems) => {
+        if (err) {
+          resolve({ map: new Map(), err: err.message });
+          return;
+        }
+        const map = new Map<string, string>();
+        for (const item of receivedItems ?? []) {
+          const oldId = item.assetid ?? item.id;
+          if (oldId && item.new_assetid) {
+            map.set(oldId, item.new_assetid);
+          }
+        }
+        resolve({ map, err: null });
+      }
+    );
+  });
+}
+
+async function resolveExchangeAssetIds(
+  offer: TradeOffer,
+  offerId: string
+): Promise<Map<string, string>> {
+  for (let attempt = 1; attempt <= EXCHANGE_DETAIL_ATTEMPTS; attempt++) {
+    const { map, err } = await getExchangeDetailsOnce(offer);
+
+    if (err !== null) {
+      console.warn(
+        `[donations] getExchangeDetails attempt ${String(attempt)}/${String(EXCHANGE_DETAIL_ATTEMPTS)} failed for offer ${offerId}: ${err}`
+      );
+    } else if (map.size > 0) {
+      console.log(
+        `[donations] Exchange details resolved on attempt ${String(attempt)}/${String(EXCHANGE_DETAIL_ATTEMPTS)}: ${String(map.size)} mapping(s) for offer ${offerId}`
+      );
+      return map;
+    } else {
+      console.log(
+        `[donations] Exchange details empty on attempt ${String(attempt)}/${String(EXCHANGE_DETAIL_ATTEMPTS)} for offer ${offerId}; trade may not be fully processed yet`
+      );
+    }
+
+    if (attempt < EXCHANGE_DETAIL_ATTEMPTS) {
+      await sleep(EXCHANGE_DETAIL_DELAY_MS);
+    }
+  }
+
+  console.warn(
+    `[donations] Could not resolve exchange asset IDs for offer ${offerId} after ${String(EXCHANGE_DETAIL_ATTEMPTS)} attempts; donor attribution asset IDs may be stale`
+  );
+  return new Map();
+}
+
 function readCachedPersonaName(ctx: SteamContext, steamId64: string): string | null {
   const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
     | Record<string, unknown>
@@ -211,10 +293,12 @@ export async function approveDonationOffer(
     );
   }
 
+  const newAssetIdMap = await resolveExchangeAssetIds(steamOffer, offerId);
+
   const prizeItems: DonationItemInput[] = pendingOffer.items.map((item) => ({
     appId: item.app_id,
     contextId: item.context_id,
-    assetId: item.asset_id,
+    assetId: newAssetIdMap.get(item.asset_id) ?? item.asset_id,
     classId: item.class_id ?? null,
     instanceId: item.instance_id ?? null,
     name: item.name,
