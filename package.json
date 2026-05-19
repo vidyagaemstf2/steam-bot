@@ -30,17 +30,17 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "^25.7.0",
+    "@types/node": "^25.9.0",
     "@types/steam-totp": "^2.1.2",
     "@types/steam-tradeoffer-manager": "^2.11.2",
     "@types/steam-user": "^5.1.1",
     "@types/steamcommunity": "^3.50.0",
     "@typescript-eslint/eslint-plugin": "^8.59.3",
     "@typescript-eslint/parser": "^8.59.3",
-    "eslint": "^10.3.0",
+    "eslint": "^10.4.0",
     "prettier": "^3.8.3",
     "prisma": "^7.8.0",
-    "tsx": "^4.21.0",
+    "tsx": "^4.22.1",
     "typescript": "^6.0.3"
   }
 }
