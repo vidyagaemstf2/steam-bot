@@ -170,6 +170,13 @@ export async function markDonationApproved(
   );
 }
 
+export async function deletePendingDonationOffer(tradeOfferId: string): Promise<boolean> {
+  const result = await prisma.donationOffer.deleteMany({
+    where: { trade_offer_id: tradeOfferId, status: 'pending_review' }
+  });
+  return result.count > 0;
+}
+
 export async function listPrizePoolItemsByAssetIds(assetIds: string[]): Promise<PrizePoolItem[]> {
   if (assetIds.length === 0) {
     return [];

@@ -10,7 +10,10 @@ import {
   reconcileOfferSentOnStartup,
   registerOfferLifecycle
 } from '@/services/offer-lifecycle.ts';
-import { registerIncomingTradePolicy } from '@/services/trades.ts';
+import {
+  reconcilePendingDonationsOnStartup,
+  registerIncomingTradePolicy
+} from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
@@ -71,6 +74,7 @@ export function startBot(): void {
         color: Colors.Green,
       });
       await reconcileOfferSentOnStartup(steamCtx);
+      await reconcilePendingDonationsOnStartup(steamCtx);
       await runExpirySweep();
       setInterval(() => { void runExpirySweep(); }, 60 * 60 * 1000);
       registerFriendGating(steamCtx);
