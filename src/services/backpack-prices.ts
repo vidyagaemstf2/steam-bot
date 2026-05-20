@@ -17,8 +17,10 @@ type V4PricesEntry = {
   value_high?: number;
 };
 
+type V4CraftableEntry = V4PricesEntry[];
+
 type V4ItemDoc = {
-  prices: Record<string, Record<string, Record<string, Record<string, V4PricesEntry>>>>;
+  prices: Record<string, Record<string, Record<string, V4CraftableEntry>>>;
 };
 
 type V4PricesResponse = {
@@ -26,15 +28,23 @@ type V4PricesResponse = {
   items: Record<string, V4ItemDoc>;
 };
 
+type V4PricesEnvelope = {
+  response?: V4PricesResponse;
+} & Partial<V4PricesResponse>;
+
 type CurrencyEntry = {
   defindex?: number;
   price?: V4PricesEntry;
 };
 
-type CurrenciesResponse = {
+type CurrenciesBody = {
   success: number;
-  currencies?: Record<string, CurrencyEntry>;
+  currencies?: Record<string, CurrencyEntry> | CurrencyEntry[];
 };
+
+type CurrenciesEnvelope = {
+  response?: CurrenciesBody;
+} & Partial<CurrenciesBody>;
 
 const QUALITY_PREFIXES: Array<[string, number]> = [
   ["Strange ", 11],
@@ -63,34 +73,65 @@ async function fetchJson<T>(url: string): Promise<T> {
   return resp.json() as Promise<T>;
 }
 
+function unwrapPrices(raw: V4PricesEnvelope): V4PricesResponse | null {
+  const body = raw.response ?? (raw as V4PricesResponse);
+  if (typeof body !== 'object' || body === null) return null;
+  if (body.success !== 1) {
+    console.error('[backpack-prices] Price schema returned success=0');
+    return null;
+  }
+  if (!body.items || typeof body.items !== 'object') {
+    console.error('[backpack-prices] Price schema response missing items object');
+    return null;
+  }
+  return body;
+}
+
+function unwrapCurrencies(raw: CurrenciesEnvelope): CurrenciesBody | null {
+  const body = raw.response ?? (raw as CurrenciesBody);
+  if (typeof body !== 'object' || body === null) return null;
+  return body.success === 1 ? body : null;
+}
+
 async function loadPriceData(): Promise<void> {
   const apiKey = env.BACKPACK_TF_API_KEY;
   if (!apiKey) {
+    console.warn('[backpack-prices] BACKPACK_TF_API_KEY is not set; pricing unavailable.');
     return;
   }
 
   const [pricesData, currenciesData] = await Promise.allSettled([
-    fetchJson<V4PricesResponse>(`${BPTF_API_BASE}/IGetPrices/v4?key=${encodeURIComponent(apiKey)}`),
-    fetchJson<CurrenciesResponse>(`${BPTF_API_BASE}/IGetCurrencies/v1?key=${encodeURIComponent(apiKey)}`)
+    fetchJson<V4PricesEnvelope>(`${BPTF_API_BASE}/IGetPrices/v4?key=${encodeURIComponent(apiKey)}`),
+    fetchJson<CurrenciesEnvelope>(`${BPTF_API_BASE}/IGetCurrencies/v1?key=${encodeURIComponent(apiKey)}`)
   ]);
 
-  if (pricesData.status === 'fulfilled' && pricesData.value.success === 1) {
-    cachedPrices = pricesData.value;
-    cacheExpiresAt = Date.now() + PRICES_TTL_MS;
-    console.log(
-      `[backpack-prices] Price schema loaded (${String(Object.keys(pricesData.value.items ?? {}).length)} items).`
-    );
-  } else if (pricesData.status === 'rejected') {
+  if (pricesData.status === 'rejected') {
     console.error('[backpack-prices] Failed to fetch price schema:', pricesData.reason);
+  } else {
+    const prices = unwrapPrices(pricesData.value);
+    if (prices) {
+      cachedPrices = prices;
+      cacheExpiresAt = Date.now() + PRICES_TTL_MS;
+      console.log(
+        `[backpack-prices] Price schema loaded (${String(Object.keys(prices.items).length)} items).`
+      );
+    }
   }
 
-  if (currenciesData.status === 'fulfilled' && currenciesData.value.success === 1) {
-    const currencies = currenciesData.value.currencies ?? {};
-    for (const entry of Object.values(currencies)) {
-      if (entry.defindex === KEYS_DEFINDEX && entry.price?.currency === 'metal') {
-        keyPriceInMetal = entry.price.value;
-        console.log(`[backpack-prices] Key price: ${String(keyPriceInMetal)} ref.`);
-        break;
+  if (currenciesData.status === 'rejected') {
+    console.error('[backpack-prices] Failed to fetch currencies:', currenciesData.reason);
+  } else {
+    const currencies = unwrapCurrencies(currenciesData.value);
+    if (currencies?.currencies) {
+      const entries = Array.isArray(currencies.currencies)
+        ? currencies.currencies
+        : Object.values(currencies.currencies);
+      for (const entry of entries) {
+        if (entry.defindex === KEYS_DEFINDEX && entry.price?.currency === 'metal') {
+          keyPriceInMetal = entry.price.value;
+          console.log(`[backpack-prices] Key price: ${String(keyPriceInMetal)} ref.`);
+          break;
+        }
       }
     }
   }
@@ -108,40 +149,69 @@ async function ensurePriceCacheReady(): Promise<void> {
   await fetchInProgress;
 }
 
-function parseItemQualityAndBase(itemName: string): { quality: number; baseName: string } {
+function stripThe(name: string): string {
+  return name.startsWith('The ') ? name.slice(4) : name;
+}
+
+function buildCandidates(itemName: string): Array<[string, number]> {
+  const candidates: Array<[string, number]> = [];
+
+  // Always try the exact name (and without "The ") as Unique quality first.
+  // This handles items whose name starts with a quality word that is actually
+  // part of the name (e.g. "Vintage Tyrolean" is Unique quality, not Vintage quality).
+  candidates.push([itemName, UNIQUE_QUALITY]);
+  const withoutThe = stripThe(itemName);
+  if (withoutThe !== itemName) {
+    candidates.push([withoutThe, UNIQUE_QUALITY]);
+  }
+
+  // Then try stripping a known quality prefix and using the matching quality.
   for (const [prefix, quality] of QUALITY_PREFIXES) {
     if (itemName.startsWith(prefix)) {
-      return { quality, baseName: itemName.slice(prefix.length) };
+      const base = itemName.slice(prefix.length);
+      candidates.push([base, quality]);
+      const baseWithoutThe = stripThe(base);
+      if (baseWithoutThe !== base) {
+        candidates.push([baseWithoutThe, quality]);
+      }
+      break;
     }
   }
-  return { quality: UNIQUE_QUALITY, baseName: itemName };
+
+  return candidates;
+}
+
+function priceEntryFromDoc(
+  itemDoc: V4ItemDoc,
+  quality: number
+): V4PricesEntry | null {
+  const qualityDoc = itemDoc.prices[String(quality)];
+  if (!qualityDoc) return null;
+  const tradable = qualityDoc['Tradable'];
+  if (!tradable) return null;
+  const craftable = tradable['Craftable'];
+  if (!craftable) return null;
+  return craftable[0] ?? null;
 }
 
 function lookupInCache(itemName: string): PriceResult | null {
   if (!cachedPrices) return null;
 
-  const { quality, baseName } = parseItemQualityAndBase(itemName);
+  for (const [baseName, quality] of buildCandidates(itemName)) {
+    const itemDoc = cachedPrices.items[baseName];
+    if (!itemDoc) continue;
 
-  const itemDoc = cachedPrices.items[baseName];
-  if (!itemDoc) return null;
+    const entry = priceEntryFromDoc(itemDoc, quality);
+    if (!entry) continue;
 
-  const qualityDoc = itemDoc.prices[String(quality)];
-  if (!qualityDoc) return null;
+    const currency = entry.currency === 'keys' ? 'keys' : 'metal';
+    const value =
+      entry.value_high != null ? (entry.value + entry.value_high) / 2 : entry.value;
+    const valueInMetal = currency === 'keys' ? value * keyPriceInMetal : value;
+    return { currency, value, valueInMetal };
+  }
 
-  const tradable = qualityDoc['Tradable'];
-  if (!tradable) return null;
-
-  const craftable = tradable['Craftable'];
-  if (!craftable) return null;
-
-  const entry = craftable['0'];
-  if (!entry) return null;
-
-  const currency = entry.currency === 'keys' ? 'keys' : 'metal';
-  const value = entry.value;
-  const valueInMetal = currency === 'keys' ? value * keyPriceInMetal : value;
-
-  return { currency, value, valueInMetal };
+  return null;
 }
 
 export async function lookupItemPrice(itemName: string): Promise<PriceResult | null> {
