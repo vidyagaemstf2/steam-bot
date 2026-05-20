@@ -229,6 +229,37 @@ export async function createPendingDelivery(
   }
 }
 
+export async function cancelDeliveriesByTradeOfferId(tradeOfferId: string): Promise<PendingDelivery[]> {
+  const rows = await prisma.pendingDelivery.findMany({
+    where: {
+      trade_offer_id: tradeOfferId,
+      status: { in: [...RESERVED_STATUSES] }
+    }
+  });
+  if (rows.length === 0) return [];
+  await prisma.pendingDelivery.updateMany({
+    where: { id: { in: rows.map((r) => r.id) } },
+    data: { status: 'cancelled', active_reservation_key: null }
+  });
+  return rows;
+}
+
+export async function cancelDeliveriesByAssetIds(assetIds: string[]): Promise<PendingDelivery[]> {
+  if (assetIds.length === 0) return [];
+  const active = await prisma.pendingDelivery.findMany({
+    where: {
+      asset_id: { in: assetIds },
+      status: { in: [...RESERVED_STATUSES] }
+    }
+  });
+  if (active.length === 0) return [];
+  await prisma.pendingDelivery.updateMany({
+    where: { id: { in: active.map((r) => r.id) } },
+    data: { status: 'cancelled', active_reservation_key: null }
+  });
+  return active;
+}
+
 export async function cancelExpiredDeliveries(): Promise<PendingDelivery[]> {
   const now = new Date();
   const expired = await prisma.pendingDelivery.findMany({

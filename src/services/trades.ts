@@ -2,6 +2,7 @@ import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js'
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
   deletePendingDonationOffer,
+  deletePrizePoolItemsByAssetIds,
   findPendingDonationOffer,
   listPendingDonationOffers,
   markDonationRejectedByPolicy,
@@ -9,6 +10,7 @@ import {
 } from '@/db/donations.ts';
 import { isBotAdmin } from '@/env.ts';
 import { resolveExchangeAssetIds, storePricesForItems, tryRecordIncomingDonationOffer } from '@/services/donations.ts';
+import { cancelDeliveriesByAssetIds } from '@/db/pending-deliveries.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
@@ -137,6 +139,33 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
       console.log(`[trades] Offer ${idStr} confirmed via STEAM_IDENTITY_SECRET`);
     } catch (err) {
       console.error(`[trades] Failed to confirm offer ${idStr}:`, err);
+    }
+  }
+
+  const rawGiven = (offer as unknown as { itemsToGive?: RawOfferItem[] }).itemsToGive ?? [];
+  const tf2Given = rawGiven.filter((i) => i.appid === TF2_APP_ID);
+  if (tf2Given.length > 0) {
+    const givenAssetIds = tf2Given.map((i) => i.assetid);
+    try {
+      const cancelledDeliveries = await cancelDeliveriesByAssetIds(givenAssetIds);
+      const deletedCount = await deletePrizePoolItemsByAssetIds(givenAssetIds);
+      console.log(
+        `[trades] Admin withdrew ${String(tf2Given.length)} TF2 item(s); removed ${String(deletedCount)} prize pool row(s), cancelled ${String(cancelledDeliveries.length)} pending delivery(s).`
+      );
+      for (const delivery of cancelledDeliveries) {
+        const winnerLink = steamProfileLink(delivery.winner_steam_id, delivery.winner_steam_id);
+        void notify('admin', {
+          title: '⚠️ Entrega cancelada — item retirado del inventario',
+          description: `El item **${delivery.item_name}** fue retirado del inventario del bot por un admin antes de ser entregado. La entrega pendiente para ${winnerLink} ha sido cancelada.`,
+          color: Colors.Yellow,
+          fields: [
+            { name: 'Asset ID', value: delivery.asset_id, inline: true },
+            { name: 'Estado anterior', value: delivery.status, inline: true }
+          ]
+        });
+      }
+    } catch (err) {
+      console.error(`[trades] Failed to clean up given items from DB:`, err);
     }
   }
 

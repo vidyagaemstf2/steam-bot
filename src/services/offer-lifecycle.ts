@@ -2,6 +2,7 @@ import SteamUser from 'steam-user';
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
+  cancelDeliveriesByTradeOfferId,
   findRowsByTradeOfferId,
   listOfferSentRows,
   listOfferSentRowsForWinner,
@@ -100,26 +101,42 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       return;
     }
 
+    if (offer.state === S.Declined || offer.state === S.Countered) {
+      const declinedWinnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
+      const declinedWinnerLabel = resolvePersonaName(ctx, declinedWinnerId);
+      const declinedItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
+      const stateLabel = offer.state === S.Countered ? 'contrarrestada' : 'rechazada';
+      console.log(
+        `[offer-lifecycle] Offer ${tid} ${stateLabel} by winner ${declinedWinnerId}; cancelling delivery and returning items to pool`
+      );
+      await cancelDeliveriesByTradeOfferId(tid);
+      void notify('admin', {
+        title: '↩️ Premio devuelto al pool',
+        description: `**${steamProfileLink(declinedWinnerLabel, declinedWinnerId)}** ${stateLabel} la oferta de premio. Los items fueron devueltos al pool y desasignados de este ganador.`,
+        color: Colors.Yellow,
+        fields: [{ name: '🎮 Items', value: declinedItems }]
+      });
+      return;
+    }
+
     if (
-      offer.state === S.Declined ||
       offer.state === S.Expired ||
       offer.state === S.Canceled ||
       offer.state === S.InvalidItems ||
-      offer.state === S.CanceledBySecondFactor ||
-      offer.state === S.Countered
+      offer.state === S.CanceledBySecondFactor
     ) {
       const endedWinnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
       const endedWinnerLabel = resolvePersonaName(ctx, endedWinnerId);
       const endedItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       if (offer.state === S.InvalidItems) {
         console.error(
-          `[offer-lifecycle] Offer ${tid} InvalidItems; items no longer valid — not marking delivered, resetting to pending`
+          `[offer-lifecycle] Offer ${tid} InvalidItems; items no longer valid — resetting to pending`
         );
         void notify('admin', {
           title: '❌ Items inválidos en la oferta',
           description: `La oferta a **${steamProfileLink(endedWinnerLabel, endedWinnerId)}** terminó con estado InvalidItems. Reseteada a pendiente — requiere revisión.`,
           color: Colors.Red,
-          fields: [{ name: '🎮 Items', value: endedItems }],
+          fields: [{ name: '🎮 Items', value: endedItems }]
         });
       } else {
         console.log(
@@ -129,7 +146,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
           title: '⚠️ Oferta de premio finalizada',
           description: `La oferta a **${steamProfileLink(endedWinnerLabel, endedWinnerId)}** terminó con estado \`${String(offer.state)}\`. Reseteada a pendiente.`,
           color: Colors.Yellow,
-          fields: [{ name: '🎮 Items', value: endedItems }],
+          fields: [{ name: '🎮 Items', value: endedItems }]
         });
       }
       await resetOfferSentToPendingByTradeOfferId(tid);

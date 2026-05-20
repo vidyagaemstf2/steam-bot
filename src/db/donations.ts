@@ -196,6 +196,14 @@ export async function listPrizePoolItemsByAssetIds(assetIds: string[]): Promise<
   });
 }
 
+export async function deletePrizePoolItemsByAssetIds(assetIds: string[]): Promise<number> {
+  if (assetIds.length === 0) return 0;
+  const result = await prisma.prizePoolItem.deleteMany({
+    where: { asset_id: { in: assetIds } }
+  });
+  return result.count;
+}
+
 export async function updatePrizePoolItemPrice(assetId: string, price: PriceInput): Promise<void> {
   await prisma.prizePoolItem.update({
     where: { asset_id: assetId },
