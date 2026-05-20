@@ -4,11 +4,13 @@ import {
   deletePendingDonationOffer,
   findPendingDonationOffer,
   listPendingDonationOffers,
-  markDonationRejectedByPolicy
+  markDonationRejectedByPolicy,
+  upsertPrizePoolItemDirect
 } from '@/db/donations.ts';
 import { isBotAdmin } from '@/env.ts';
-import { tryRecordIncomingDonationOffer } from '@/services/donations.ts';
+import { resolveExchangeAssetIds, storePricesForItems, tryRecordIncomingDonationOffer } from '@/services/donations.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
+import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
@@ -99,9 +101,18 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
 
   console.log(`[trades] Accepting offer ${offerId} from admin ${steamId}`);
 
+  type RawOfferItem = {
+    appid: number;
+    assetid: string;
+    market_hash_name?: string;
+    market_name?: string;
+    name?: string;
+  };
+
+  let acceptStatus: string;
   try {
-    const status = await acceptOffer(offer);
-    console.log(`[trades] Offer ${offerId} accepted (status: ${status})`);
+    acceptStatus = await acceptOffer(offer);
+    console.log(`[trades] Offer ${offerId} accepted (status: ${acceptStatus})`);
   } catch (err) {
     console.error(`[trades] Failed to accept offer ${offerId}:`, err);
     return;
@@ -123,6 +134,26 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
       console.error(`[trades] Failed to confirm offer ${idStr}:`, err);
     }
   }
+
+  const rawReceived = (offer as unknown as { itemsToReceive?: RawOfferItem[] }).itemsToReceive ?? [];
+  const tf2Received = rawReceived.filter((i) => i.appid === TF2_APP_ID);
+  if (tf2Received.length === 0) return;
+
+  const newIdMap = await resolveExchangeAssetIds(offer, offerId);
+
+  const prizeEntries: Array<{ assetId: string; name: string }> = [];
+  for (const item of tf2Received) {
+    const resolvedId = newIdMap.get(item.assetid) ?? item.assetid;
+    const name = item.market_hash_name ?? item.market_name ?? item.name ?? '';
+    try {
+      await upsertPrizePoolItemDirect(resolvedId, name, steamId);
+      prizeEntries.push({ assetId: resolvedId, name });
+    } catch (err) {
+      console.error(`[trades] Failed to upsert prize pool row for ${resolvedId}:`, err);
+    }
+  }
+
+  void storePricesForItems(prizeEntries);
 }
 
 async function handleReceivedOfferChanged(offer: TradeOffer): Promise<void> {

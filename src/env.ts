@@ -39,7 +39,9 @@ export const env = createEnv({
     /** Discord webhook URL for the public donations announcement channel. */
     DISCORD_WEBHOOK_DONATIONS: z.string().url().optional(),
     /** Days before an admin-initiated unclaimed delivery is auto-cancelled. */
-    MANUAL_DELIVERY_EXPIRY_DAYS: z.coerce.number().int().min(1).default(7)
+    MANUAL_DELIVERY_EXPIRY_DAYS: z.coerce.number().int().min(1).default(7),
+    /** backpack.tf WebAPI key for item pricing (optional; pricing is skipped when absent). */
+    BACKPACK_TF_API_KEY: z.string().min(1).optional()
   },
   runtimeEnv,
   emptyStringAsUndefined: true

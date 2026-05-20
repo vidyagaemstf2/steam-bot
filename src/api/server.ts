@@ -19,6 +19,12 @@ export type InventoryItemJson = {
   donorName?: string;
   /** Omitted when `GET /inventory?minimal=1` (smaller JSON for fragile HTTP/2 clients). */
   imageUrl?: string;
+  /** Value in keys. Present only when backpack.tf prices this item in keys. */
+  priceKeys?: number;
+  /** Value in refined metal. Present only when backpack.tf prices this item in metal. */
+  priceMetal?: number;
+  /** Which currency the price is expressed in. */
+  priceCurrency?: 'keys' | 'metal';
 };
 
 type EconItem = {
@@ -182,21 +188,41 @@ async function handleInventory(
     }
   }
 
+  let priceInMetalByAsset = new Map<string, number>();
   try {
     const attributions = await listPrizePoolItemsByAssetIds(available.map((item) => item.assetId));
     const byAsset = new Map(attributions.map((item) => [item.asset_id, item]));
     for (const item of available) {
       const attribution = byAsset.get(item.assetId);
       if (attribution) {
-        item.donorSteamId = attribution.donor_steam_id;
+        if (attribution.donor_steam_id) {
+          item.donorSteamId = attribution.donor_steam_id;
+        }
         if (attribution.donor_name) {
           item.donorName = attribution.donor_name;
+        }
+        if (attribution.price_keys != null) {
+          item.priceKeys = attribution.price_keys;
+          item.priceCurrency = 'keys';
+        } else if (attribution.price_metal != null) {
+          item.priceMetal = attribution.price_metal;
+          item.priceCurrency = 'metal';
+        }
+        if (attribution.price_in_metal != null) {
+          priceInMetalByAsset.set(item.assetId, attribution.price_in_metal);
         }
       }
     }
   } catch (err) {
     console.error('[api] Database error loading donation attribution:', err);
+    priceInMetalByAsset = new Map();
   }
+
+  available.sort((a, b) => {
+    const aVal = priceInMetalByAsset.get(a.assetId) ?? -1;
+    const bVal = priceInMetalByAsset.get(b.assetId) ?? -1;
+    return bVal - aVal;
+  });
 
   sendJson(res, 200, available, req);
 }

@@ -81,15 +81,19 @@ model DonationOfferItem {
 }
 
 model PrizePoolItem {
-  id                Int      @id @default(autoincrement())
-  asset_id          String   @unique @db.VarChar(256)
-  item_name         String   @db.VarChar(512)
-  donor_steam_id    String   @db.VarChar(32)
-  donor_name        String?  @db.VarChar(128)
-  donation_offer_id Int
-  approved_at       DateTime @default(now())
+  id                Int       @id @default(autoincrement())
+  asset_id          String    @unique @db.VarChar(256)
+  item_name         String    @db.VarChar(512)
+  donor_steam_id    String    @db.VarChar(32)
+  donor_name        String?   @db.VarChar(128)
+  donation_offer_id Int?
+  approved_at       DateTime  @default(now())
+  price_keys        Float?
+  price_metal       Float?
+  price_in_metal    Float?
+  priced_at         DateTime?
 
-  donationOffer DonationOffer @relation(fields: [donation_offer_id], references: [id])
+  donationOffer DonationOffer? @relation(fields: [donation_offer_id], references: [id])
 
   @@index([donor_steam_id])
   @@map("prize_pool_items")

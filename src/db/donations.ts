@@ -1,6 +1,12 @@
 import { prisma } from '@/db.ts';
 import type { DonationOffer, DonationOfferItem, PrizePoolItem } from '../../generated/prisma/client.ts';
 
+export type PriceInput = {
+  priceKeys?: number | null;
+  priceMetal?: number | null;
+  priceInMetal: number;
+};
+
 export type DonationItemInput = {
   appId: number;
   contextId: string;
@@ -161,7 +167,11 @@ export async function markDonationApproved(
             donor_steam_id: offer.donor_steam_id,
             donor_name: offer.donor_name,
             donation_offer_id: offer.id,
-            approved_at: now
+            approved_at: now,
+            price_keys: null,
+            price_metal: null,
+            price_in_metal: null,
+            priced_at: null
           }
         });
       }
@@ -183,5 +193,40 @@ export async function listPrizePoolItemsByAssetIds(assetIds: string[]): Promise<
   }
   return prisma.prizePoolItem.findMany({
     where: { asset_id: { in: [...new Set(assetIds)] } }
+  });
+}
+
+export async function updatePrizePoolItemPrice(assetId: string, price: PriceInput): Promise<void> {
+  await prisma.prizePoolItem.update({
+    where: { asset_id: assetId },
+    data: {
+      price_keys: price.priceKeys ?? null,
+      price_metal: price.priceMetal ?? null,
+      price_in_metal: price.priceInMetal,
+      priced_at: new Date()
+    }
+  });
+}
+
+export async function upsertPrizePoolItemDirect(
+  assetId: string,
+  itemName: string,
+  depositorSteamId: string
+): Promise<void> {
+  const now = new Date();
+  await prisma.prizePoolItem.upsert({
+    where: { asset_id: assetId },
+    update: { item_name: itemName, donor_steam_id: depositorSteamId, approved_at: now },
+    create: {
+      asset_id: assetId,
+      item_name: itemName,
+      donor_steam_id: depositorSteamId,
+      donation_offer_id: null,
+      approved_at: now,
+      price_keys: null,
+      price_metal: null,
+      price_in_metal: null,
+      priced_at: null
+    }
   });
 }

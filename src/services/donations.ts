@@ -6,10 +6,12 @@ import {
   markDonationApproved,
   markDonationRejected,
   recordDonationOffer,
+  updatePrizePoolItemPrice,
   type DonationItemInput,
   type DonationReviewerInput,
   type PendingDonationOffer
 } from '@/db/donations.ts';
+import { lookupItemPrice } from '@/services/backpack-prices.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
@@ -132,7 +134,7 @@ function getExchangeDetailsOnce(
   });
 }
 
-async function resolveExchangeAssetIds(
+export async function resolveExchangeAssetIds(
   offer: TradeOffer,
   offerId: string
 ): Promise<Map<string, string>> {
@@ -243,6 +245,27 @@ export async function tryRecordIncomingDonationOffer(
   });
 }
 
+export async function storePricesForItems(
+  items: Array<{ assetId: string; name: string }>
+): Promise<void> {
+  for (const item of items) {
+    try {
+      const price = await lookupItemPrice(item.name);
+      if (!price) continue;
+      await updatePrizePoolItemPrice(item.assetId, {
+        priceKeys: price.currency === 'keys' ? price.value : null,
+        priceMetal: price.currency === 'metal' ? price.value : null,
+        priceInMetal: price.valueInMetal
+      });
+    } catch (err) {
+      console.error(
+        `[donations] Failed to store price for ${item.assetId} (${item.name}):`,
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+  }
+}
+
 export async function approveDonationOffer(
   ctx: SteamContext,
   tradeOfferId: string,
@@ -306,6 +329,8 @@ export async function approveDonationOffer(
   }));
 
   await markDonationApproved(pendingOffer, reviewer, prizeItems);
+
+  void storePricesForItems(prizeItems.map((i) => ({ assetId: i.assetId, name: i.name })));
 
   const donorLinkApprove = steamProfileLink(
     pendingOffer.donor_name ?? pendingOffer.donor_steam_id,
