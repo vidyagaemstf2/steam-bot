@@ -74,28 +74,33 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
     }
   };
 
-  if (!isBotAdmin(steamId)) {
-    try {
-      const recordedDonation = await tryRecordIncomingDonationOffer(offer, ctx);
-      if (recordedDonation) {
-        console.log(`[trades] Donation offer ${offerId} from ${steamId} queued for admin review`);
-        const donorLink = steamProfileLink(
-          recordedDonation.donor_name ?? recordedDonation.donor_steam_id,
-          recordedDonation.donor_steam_id
-        );
-        const itemList = recordedDonation.items.map((i) => `• ${i.name}`).join('\n') || '—';
-        void notify('admin', {
-          title: '📬 Nueva oferta de donación pendiente',
-          description: `**${donorLink}** envió una oferta de donación con ${String(recordedDonation.items.length)} item(s). Requiere aprobación.`,
-          color: Colors.Blue,
-          fields: [{ name: `🎮 Items (${String(recordedDonation.items.length)})`, value: itemList }]
-        });
-        return;
-      }
-      await decline('sender is not in BOT_ADMINS and offer is not marked as a donation');
-    } catch (err) {
-      await decline(err instanceof Error ? err.message : String(err));
+  try {
+    const recordedDonation = await tryRecordIncomingDonationOffer(offer, ctx);
+    if (recordedDonation) {
+      console.log(`[trades] Donation offer ${offerId} from ${steamId} queued for admin review`);
+      const donorLink = steamProfileLink(
+        recordedDonation.donor_name ?? recordedDonation.donor_steam_id,
+        recordedDonation.donor_steam_id
+      );
+      const itemList = recordedDonation.items.map((i) => `• ${i.name}`).join('\n') || '—';
+      void notify('admin', {
+        title: '📬 Nueva oferta de donación pendiente',
+        description: `**${donorLink}** envió una oferta de donación con ${String(recordedDonation.items.length)} item(s). Requiere aprobación.`,
+        color: Colors.Blue,
+        fields: [{ name: `🎮 Items (${String(recordedDonation.items.length)})`, value: itemList }]
+      });
+      return;
     }
+  } catch (err) {
+    if (!isBotAdmin(steamId)) {
+      await decline(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    console.error(`[trades] Donation detection error for admin offer ${offerId}; proceeding to auto-accept:`, err);
+  }
+
+  if (!isBotAdmin(steamId)) {
+    await decline('sender is not in BOT_ADMINS and offer is not marked as a donation');
     return;
   }
 
