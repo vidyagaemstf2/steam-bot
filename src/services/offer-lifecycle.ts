@@ -245,6 +245,36 @@ export async function reconcileOfferSentOnStartup(ctx: SteamContext): Promise<vo
   console.log('[reconcile] Startup reconciliation finished.');
 }
 
+/**
+ * Cancels a Steam trade offer if it is currently in an active/cancellable state.
+ * Safe to call for any offer ID; silently skips if not found or already terminal.
+ */
+export async function cancelTradeOfferIfActive(
+  manager: SteamContext['tradeOfferManager'],
+  tradeOfferId: string
+): Promise<void> {
+  let offer: TradeOffer;
+  try {
+    offer = await getOffer(manager, tradeOfferId);
+  } catch (err) {
+    console.warn(`[offer-lifecycle] Could not fetch offer ${tradeOfferId} for admin revoke:`, err);
+    return;
+  }
+  const S = TradeOfferManager.ETradeOfferState;
+  if (
+    offer.state === S.Active ||
+    offer.state === S.CreatedNeedsConfirmation ||
+    offer.state === S.InEscrow
+  ) {
+    try {
+      await cancelOffer(offer);
+      console.log(`[offer-lifecycle] Cancelled offer ${tradeOfferId} (admin revoke)`);
+    } catch (err) {
+      console.error(`[offer-lifecycle] Failed to cancel offer ${tradeOfferId} (admin revoke):`, err);
+    }
+  }
+}
+
 let offerLifecycleRegistered = false;
 
 /**

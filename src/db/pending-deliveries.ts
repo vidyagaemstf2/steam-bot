@@ -260,6 +260,23 @@ export async function cancelDeliveriesByAssetIds(assetIds: string[]): Promise<Pe
   return active;
 }
 
+export async function findActiveDeliveryByAssetId(assetId: string): Promise<PendingDelivery | null> {
+  return prisma.pendingDelivery.findFirst({
+    where: {
+      asset_id: assetId.trim(),
+      status: { in: [...RESERVED_STATUSES] }
+    },
+    orderBy: { id: 'asc' }
+  });
+}
+
+export async function listActiveDeliveries(): Promise<PendingDelivery[]> {
+  return prisma.pendingDelivery.findMany({
+    where: { status: { in: [...RESERVED_STATUSES] } },
+    orderBy: { created_at: 'desc' }
+  });
+}
+
 export async function cancelExpiredDeliveries(): Promise<PendingDelivery[]> {
   const now = new Date();
   const expired = await prisma.pendingDelivery.findMany({

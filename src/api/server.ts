@@ -4,9 +4,16 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import SteamUser from 'steam-user';
 import { listPendingDonationOffers, listPrizePoolItemsByAssetIds } from '@/db/donations.ts';
-import { createPendingDelivery, listReservedAssetIds } from '@/db/pending-deliveries.ts';
+import {
+  cancelDeliveriesByAssetIds,
+  createPendingDelivery,
+  findActiveDeliveryByAssetId,
+  listActiveDeliveries,
+  listReservedAssetIds
+} from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
+import { cancelTradeOfferIfActive } from '@/services/offer-lifecycle.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 import { approveDonationOffer, rejectDonationOffer } from '@/services/donations.ts';
 import type { SteamContext } from '@/steam/session.ts';
@@ -307,6 +314,21 @@ async function handleDeliveryRecord(
     triggerPrizeDelivery(ctx, steamId64);
   }
 
+  const winnerLabel = resolvePersonaName(ctx, steamId64);
+  void notify('admin', {
+    title: '🎉 Premio asignado',
+    description: `**${steamProfileLink(winnerLabel, steamId64)}** ganó **${itemName.trim()}**.`,
+    color: Colors.Green,
+    fields: [
+      { name: 'Expira', value: expiresAt.toISOString().slice(0, 10), inline: true },
+      {
+        name: 'Estado',
+        value: isFriend ? 'Oferta en cola' : 'Esperando que agregue al bot',
+        inline: true
+      }
+    ]
+  });
+
   sendJson(res, 201, { recorded: true, isFriend, deliveryQueued: isFriend });
 }
 
@@ -390,6 +412,162 @@ async function handleAdminSend(
     count: items.length,
     isFriend,
     deliveryQueued: isFriend
+  });
+}
+
+function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
+  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
+    | Record<string, unknown>
+    | undefined;
+  if (!persona) return steamId64;
+  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
+    const v = persona[key];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return steamId64;
+}
+
+async function handleDeliveryActive(
+  ctx: SteamContext,
+  res: ServerResponse,
+  req: IncomingMessage
+): Promise<void> {
+  let rows: Awaited<ReturnType<typeof listActiveDeliveries>>;
+  try {
+    rows = await listActiveDeliveries();
+  } catch (err) {
+    console.error('[api] Failed to list active deliveries:', err);
+    sendJson(res, 500, { error: 'No se pudieron listar las entregas activas' });
+    return;
+  }
+
+  sendJson(
+    res,
+    200,
+    rows.map((row) => ({
+      id: row.id,
+      winnerSteamId: row.winner_steam_id,
+      winnerName: resolvePersonaName(ctx, row.winner_steam_id),
+      assetId: row.asset_id,
+      itemName: row.item_name,
+      status: row.status,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      tradeOfferId: row.trade_offer_id
+    })),
+    req
+  );
+}
+
+async function handleDeliveryRevoke(
+  ctx: SteamContext,
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown;
+  try {
+    body = await readJsonBody(req);
+  } catch {
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
+    return;
+  }
+  if (body === null || typeof body !== 'object') {
+    sendJson(res, 400, { error: 'Cuerpo invalido' });
+    return;
+  }
+
+  const obj = body as Record<string, unknown>;
+  const { assetId, action, targetSteamId, adminSteamId, adminName } = obj;
+
+  if (typeof assetId !== 'string' || assetId.trim().length === 0) {
+    sendJson(res, 400, { error: 'assetId invalido' });
+    return;
+  }
+  if (action !== 'return_to_pool' && action !== 'reassign') {
+    sendJson(res, 400, { error: 'action debe ser return_to_pool o reassign' });
+    return;
+  }
+  if (action === 'reassign') {
+    if (typeof targetSteamId !== 'string' || !isValidSteamId64(targetSteamId)) {
+      sendJson(res, 400, { error: 'targetSteamId invalido para reassign' });
+      return;
+    }
+  }
+
+  const normalizedAssetId = (assetId as string).trim();
+
+  let active: Awaited<ReturnType<typeof findActiveDeliveryByAssetId>>;
+  try {
+    active = await findActiveDeliveryByAssetId(normalizedAssetId);
+  } catch (err) {
+    console.error('[api] Failed to look up active delivery for revoke:', err);
+    sendJson(res, 500, { error: 'Error consultando la base de datos' });
+    return;
+  }
+
+  if (!active) {
+    sendJson(res, 404, { error: 'No se encontro una entrega activa para ese asset' });
+    return;
+  }
+
+  if (active.status === 'offer_sent' && active.trade_offer_id) {
+    await cancelTradeOfferIfActive(ctx.tradeOfferManager, active.trade_offer_id);
+  }
+
+  try {
+    await cancelDeliveriesByAssetIds([normalizedAssetId]);
+  } catch (err) {
+    console.error('[api] Failed to cancel delivery during revoke:', err);
+    sendJson(res, 500, { error: 'Error cancelando la entrega en la base de datos' });
+    return;
+  }
+
+  let newWinnerName: string | undefined;
+
+  if (action === 'reassign' && typeof targetSteamId === 'string') {
+    try {
+      await createPendingDelivery(targetSteamId, normalizedAssetId, active.item_name);
+    } catch (err) {
+      console.error('[api] Failed to create reassigned delivery:', err);
+      sendJson(res, 500, { error: 'Se cancelo la entrega pero fallo la reasignacion' });
+      return;
+    }
+    newWinnerName = resolvePersonaName(ctx, targetSteamId);
+    const isFriend = ctx.user.myFriends[targetSteamId] === SteamUser.EFriendRelationship.Friend;
+    if (isFriend) {
+      triggerPrizeDelivery(ctx, targetSteamId);
+    }
+  }
+
+  const adminLabel =
+    typeof adminName === 'string' && adminName.trim() ? adminName.trim() : 'admin desconocido';
+  const adminIdStr =
+    typeof adminSteamId === 'string' && isValidSteamId64(adminSteamId) ? adminSteamId : null;
+  const adminDisplay = adminIdStr ? steamProfileLink(adminLabel, adminIdStr) : adminLabel;
+  const prevWinnerLabel = resolvePersonaName(ctx, active.winner_steam_id);
+
+  if (action === 'reassign' && typeof targetSteamId === 'string') {
+    void notify('admin', {
+      title: '🔄 Premio reasignado',
+      description: `**${adminDisplay}** reasignó **${active.item_name}** de ${steamProfileLink(prevWinnerLabel, active.winner_steam_id)} a ${steamProfileLink(newWinnerName ?? targetSteamId, targetSteamId)}.`,
+      color: Colors.Blue,
+      fields: [{ name: 'Asset ID', value: normalizedAssetId }]
+    });
+  } else {
+    void notify('admin', {
+      title: '↩️ Premio devuelto al pool',
+      description: `**${adminDisplay}** revocó la entrega de **${active.item_name}** a ${steamProfileLink(prevWinnerLabel, active.winner_steam_id)} y lo devolvió al pool.`,
+      color: Colors.Yellow,
+      fields: [{ name: 'Asset ID', value: normalizedAssetId }]
+    });
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    assetId: normalizedAssetId,
+    itemName: active.item_name,
+    previousWinnerSteamId: active.winner_steam_id,
+    ...(newWinnerName !== undefined ? { newWinnerName } : {})
   });
 }
 
@@ -498,6 +676,16 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/delivery/active') {
+    await handleDeliveryActive(ctx, res, req);
+    return;
+  }
+
+  if (req.method === 'POST' && pathname === '/delivery/revoke') {
+    await handleDeliveryRevoke(ctx, req, res);
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/donations/pending') {
     await handlePendingDonations(res, req);
     return;
@@ -547,7 +735,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       });
       apiServer = server;
       console.log(
-        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send`
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send, GET /delivery/active, POST /delivery/revoke`
       );
       resolve();
     });
