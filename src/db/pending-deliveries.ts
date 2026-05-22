@@ -29,20 +29,6 @@ function isUniqueConstraintError(err: unknown): boolean {
   return (err as { code?: unknown }).code === 'P2002';
 }
 
-async function findActiveDeliveryForAsset(
-  winnerSteamId: string,
-  assetId: string
-): Promise<PendingDelivery | null> {
-  return prisma.pendingDelivery.findFirst({
-    where: {
-      winner_steam_id: winnerSteamId,
-      asset_id: assetId,
-      status: { in: [...RESERVED_STATUSES] }
-    },
-    orderBy: { id: 'asc' }
-  });
-}
-
 /**
  * Asset IDs currently tied to an undelivered delivery (inventory must not list these).
  */
@@ -62,6 +48,13 @@ export async function countPendingForWinner(winnerSteamId: string): Promise<numb
 
 export async function hasPendingForWinner(winnerSteamId: string): Promise<boolean> {
   const n = await countPendingForWinner(winnerSteamId);
+  return n > 0;
+}
+
+export async function hasActiveDeliveryForWinner(winnerSteamId: string): Promise<boolean> {
+  const n = await prisma.pendingDelivery.count({
+    where: { winner_steam_id: winnerSteamId, status: { in: [...RESERVED_STATUSES] } }
+  });
   return n > 0;
 }
 
@@ -200,9 +193,15 @@ export async function createPendingDelivery(
   expiresAt?: Date
 ): Promise<PendingDelivery> {
   const normalizedAssetId = assetId.trim();
-  const existing = await findActiveDeliveryForAsset(winnerSteamId, normalizedAssetId);
+
+  const existing = await findActiveDeliveryByAssetId(normalizedAssetId);
   if (existing) {
-    return existing;
+    if (existing.winner_steam_id === winnerSteamId) {
+      return existing;
+    }
+    throw new Error(
+      `Asset ${normalizedAssetId} (${itemName}) is already actively reserved for winner ${existing.winner_steam_id}`
+    );
   }
 
   const effectiveExpiry = expiresAt ?? defaultExpiry();
@@ -220,9 +219,14 @@ export async function createPendingDelivery(
     });
   } catch (err) {
     if (isUniqueConstraintError(err)) {
-      const winnerDelivery = await findActiveDeliveryForAsset(winnerSteamId, normalizedAssetId);
-      if (winnerDelivery) {
-        return winnerDelivery;
+      const race = await findActiveDeliveryByAssetId(normalizedAssetId);
+      if (race) {
+        if (race.winner_steam_id === winnerSteamId) {
+          return race;
+        }
+        throw new Error(
+          `Asset ${normalizedAssetId} (${itemName}) is already actively reserved for winner ${race.winner_steam_id}`
+        );
       }
     }
     throw err;
@@ -293,4 +297,22 @@ export async function cancelExpiredDeliveries(): Promise<PendingDelivery[]> {
     data: { status: 'cancelled', active_reservation_key: null }
   });
   return expired;
+}
+
+export async function findStaleOfferSentDeliveries(): Promise<PendingDelivery[]> {
+  const now = new Date();
+  return prisma.pendingDelivery.findMany({
+    where: {
+      status: 'offer_sent',
+      expires_at: { not: null, lt: now }
+    }
+  });
+}
+
+export async function cancelDeliveriesByIds(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  await prisma.pendingDelivery.updateMany({
+    where: { id: { in: ids } },
+    data: { status: 'cancelled', active_reservation_key: null, trade_offer_id: null }
+  });
 }

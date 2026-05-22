@@ -9,6 +9,7 @@ import {
   markDeliveredByTradeOfferId,
   resetOfferSentToPendingByTradeOfferId
 } from '@/db/pending-deliveries.ts';
+import { deletePrizePoolItemsByAssetIds } from '@/db/donations.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
@@ -72,6 +73,18 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       console.log(
         `[offer-lifecycle] Offer ${tid} accepted; marked delivered (${String(tracked.length)} row(s))`
       );
+      const deliveredAssetIds = tracked.map((r) => r.asset_id);
+      try {
+        const deleted = await deletePrizePoolItemsByAssetIds(deliveredAssetIds);
+        console.log(
+          `[offer-lifecycle] Removed ${String(deleted)} prize_pool_items row(s) for delivered offer ${tid}`
+        );
+      } catch (err) {
+        console.error(
+          `[offer-lifecycle] Failed to remove prize_pool_items for delivered offer ${tid}:`,
+          err
+        );
+      }
       const winnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
       const winnerLabel = resolvePersonaName(ctx, winnerId);
       const deliveredItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';

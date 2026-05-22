@@ -148,7 +148,8 @@ async function handleInventory(
   ctx: SteamContext,
   req: IncomingMessage,
   res: ServerResponse,
-  minimal: boolean
+  minimal: boolean,
+  includeReserved: boolean
 ): Promise<void> {
   const sid = ctx.user.steamID;
   if (!sid) {
@@ -182,7 +183,10 @@ async function handleInventory(
   const available: InventoryItemJson[] = [];
   for (const item of items) {
     const assetId = String(item.assetid ?? item.id ?? '').trim();
-    if (!assetId || reserved.has(assetId)) {
+    if (!assetId) {
+      continue;
+    }
+    if (!includeReserved && reserved.has(assetId)) {
       continue;
     }
     const mapped = mapItem(item);
@@ -302,6 +306,13 @@ async function handleDeliveryRecord(
 
   const expiresAt = new Date(Date.now() + env.MANUAL_DELIVERY_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
   try {
+    const conflict = await findActiveDeliveryByAssetId(assetId.trim());
+    if (conflict && conflict.winner_steam_id !== steamId64) {
+      sendJson(res, 409, {
+        error: `Asset ${assetId.trim()} ya está reservado para otro ganador (${conflict.winner_steam_id})`
+      });
+      return;
+    }
     await createPendingDelivery(steamId64, assetId.trim(), itemName.trim(), expiresAt);
   } catch (err) {
     console.error('[api] Failed to record delivery:', err);
@@ -376,8 +387,27 @@ async function handleAdminSend(
   const expiryDays = env.MANUAL_DELIVERY_EXPIRY_DAYS;
   const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
 
+  const typedItems = items as Record<string, unknown>[];
+
+  for (const raw of typedItems) {
+    const assetId = (raw.assetId as string).trim();
+    try {
+      const conflict = await findActiveDeliveryByAssetId(assetId);
+      if (conflict && conflict.winner_steam_id !== winnerSteamId) {
+        sendJson(res, 409, {
+          error: `Asset ${assetId} ya está reservado para otro ganador (${conflict.winner_steam_id})`
+        });
+        return;
+      }
+    } catch (err) {
+      console.error(`[api] Failed to check reservation for asset ${assetId}:`, err);
+      sendJson(res, 500, { error: 'No se pudo verificar la disponibilidad del item' });
+      return;
+    }
+  }
+
   try {
-    for (const raw of items as Record<string, unknown>[]) {
+    for (const raw of typedItems) {
       await createPendingDelivery(
         winnerSteamId,
         (raw.assetId as string).trim(),
@@ -651,7 +681,8 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
 
   if (req.method === 'GET' && pathname === '/inventory') {
     const minimal = url.searchParams.get('minimal') === '1';
-    await handleInventory(ctx, req, res, minimal);
+    const includeReserved = url.searchParams.get('includeReserved') === '1';
+    await handleInventory(ctx, req, res, minimal, includeReserved);
     return;
   }
 

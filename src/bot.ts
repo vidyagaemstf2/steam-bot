@@ -1,12 +1,17 @@
 import { startApiServer } from '@/api/server.ts';
 import { prisma } from '@/db.ts';
-import { cancelExpiredDeliveries } from '@/db/pending-deliveries.ts';
+import {
+  cancelDeliveriesByIds,
+  cancelExpiredDeliveries,
+  findStaleOfferSentDeliveries
+} from '@/db/pending-deliveries.ts';
 import { env } from '@/env.ts';
 import { registerClaimChat } from '@/services/claim-chat.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
 import { registerFriendGating } from '@/services/friends.ts';
 import { registerHelpChat } from '@/services/help-chat.ts';
 import {
+  cancelTradeOfferIfActive,
   reconcileOfferSentOnStartup,
   registerOfferLifecycle
 } from '@/services/offer-lifecycle.ts';
@@ -15,29 +20,55 @@ import {
   registerIncomingTradePolicy
 } from '@/services/trades.ts';
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
+import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 
 export { prisma, getSteamContext, shutdownSteam };
 
-async function runExpirySweep(): Promise<void> {
+async function runExpirySweep(ctx: SteamContext): Promise<void> {
   try {
     const cancelled = await cancelExpiredDeliveries();
-    if (cancelled.length === 0) {
-      return;
+    if (cancelled.length > 0) {
+      console.log(`[bot] Expired ${String(cancelled.length)} unclaimed delivery row(s).`);
+      void notify('admin', {
+        title: 'Unclaimed deliveries expired',
+        description: `${String(cancelled.length)} delivery row(s) were auto-cancelled due to expiry.`,
+        color: Colors.Yellow,
+        fields: cancelled.map((r) => ({
+          name: r.item_name,
+          value: steamProfileLink(r.winner_steam_id, r.winner_steam_id),
+          inline: true
+        }))
+      });
     }
-    console.log(`[bot] Expired ${String(cancelled.length)} unclaimed delivery row(s).`);
+  } catch (err) {
+    console.error('[bot] Pending expiry sweep failed:', err);
+  }
+
+  try {
+    const stale = await findStaleOfferSentDeliveries();
+    if (stale.length === 0) return;
+
+    console.log(`[bot] Found ${String(stale.length)} stale offer_sent delivery row(s) past expiry; cancelling...`);
+    for (const row of stale) {
+      if (row.trade_offer_id) {
+        await cancelTradeOfferIfActive(ctx.tradeOfferManager, row.trade_offer_id);
+      }
+    }
+    await cancelDeliveriesByIds(stale.map((r) => r.id));
+    console.log(`[bot] Cancelled ${String(stale.length)} stale offer_sent row(s).`);
     void notify('admin', {
-      title: 'Unclaimed deliveries expired',
-      description: `${String(cancelled.length)} delivery row(s) were auto-cancelled due to expiry.`,
+      title: '⏰ Ofertas de premio vencidas canceladas',
+      description: `${String(stale.length)} oferta(s) en estado offer_sent fueron canceladas por expiración. Los items fueron devueltos al pool.`,
       color: Colors.Yellow,
-      fields: cancelled.map((r) => ({
+      fields: stale.map((r) => ({
         name: r.item_name,
         value: steamProfileLink(r.winner_steam_id, r.winner_steam_id),
         inline: true
       }))
     });
   } catch (err) {
-    console.error('[bot] Expiry sweep failed:', err);
+    console.error('[bot] Offer-sent expiry sweep failed:', err);
   }
 }
 
@@ -75,8 +106,8 @@ export function startBot(): void {
       });
       await reconcileOfferSentOnStartup(steamCtx);
       await reconcilePendingDonationsOnStartup(steamCtx);
-      await runExpirySweep();
-      setInterval(() => { void runExpirySweep(); }, 60 * 60 * 1000);
+      await runExpirySweep(steamCtx);
+      setInterval(() => { void runExpirySweep(steamCtx); }, 60 * 60 * 1000);
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
       registerHelpChat(steamCtx);
