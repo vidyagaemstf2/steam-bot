@@ -15,6 +15,7 @@ import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+import { resolvePersonaName } from '@/utils/persona.ts';
 
 function acceptOffer(offer: TradeOffer): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -153,7 +154,7 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
         `[trades] Admin withdrew ${String(tf2Given.length)} TF2 item(s); removed ${String(deletedCount)} prize pool row(s), cancelled ${String(cancelledDeliveries.length)} pending delivery(s).`
       );
       for (const delivery of cancelledDeliveries) {
-        const winnerLink = steamProfileLink(delivery.winner_steam_id, delivery.winner_steam_id);
+        const winnerLink = steamProfileLink(resolvePersonaName(ctx, delivery.winner_steam_id), delivery.winner_steam_id);
         void notify('admin', {
           title: '⚠️ Entrega cancelada — item retirado del inventario',
           description: `El item **${delivery.item_name}** fue retirado del inventario del bot por un admin antes de ser entregado. La entrega pendiente para ${winnerLink} ha sido cancelada.`,

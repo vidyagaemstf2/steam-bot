@@ -16,6 +16,7 @@ import { triggerPrizeDelivery } from '@/services/delivery.ts';
 import { cancelTradeOfferIfActive } from '@/services/offer-lifecycle.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
 import { approveDonationOffer, rejectDonationOffer } from '@/services/donations.ts';
+import { resolvePersonaName } from '@/utils/persona.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 
@@ -426,9 +427,10 @@ async function handleAdminSend(
     triggerPrizeDelivery(ctx, winnerSteamId);
   }
 
+  const adminSendWinnerLabel = resolvePersonaName(ctx, winnerSteamId);
   void notify('admin', {
     title: 'Manual delivery queued',
-    description: `${String(items.length)} item(s) queued for ${steamProfileLink(winnerSteamId, winnerSteamId)}. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
+    description: `${String(items.length)} item(s) queued for ${steamProfileLink(adminSendWinnerLabel, winnerSteamId)}. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
     color: Colors.Blue,
     fields: (items as Record<string, unknown>[]).map((it) => ({
       name: (it.assetId as string).trim(),
@@ -443,18 +445,6 @@ async function handleAdminSend(
     isFriend,
     deliveryQueued: isFriend
   });
-}
-
-function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
-  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
-    | Record<string, unknown>
-    | undefined;
-  if (!persona) return steamId64;
-  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
-    const v = persona[key];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return steamId64;
 }
 
 async function handleDeliveryActive(
@@ -657,8 +647,8 @@ async function handleDonationReview(
 
   try {
     if (approve) {
-      await approveDonationOffer(ctx, tradeOfferId, { reviewerSteamId, reviewerName, note });
-      sendJson(res, 200, { ok: true, approved: true });
+      const summary = await approveDonationOffer(ctx, tradeOfferId, { reviewerSteamId, reviewerName, note });
+      sendJson(res, 200, { ok: true, approved: true, ...summary });
     } else {
       await rejectDonationOffer(ctx, tradeOfferId, { reviewerSteamId, reviewerName, note });
       sendJson(res, 200, { ok: true, rejected: true });

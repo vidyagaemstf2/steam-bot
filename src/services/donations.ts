@@ -11,7 +11,7 @@ import {
   type DonationReviewerInput,
   type PendingDonationOffer
 } from '@/db/donations.ts';
-import { lookupItemPrice } from '@/services/backpack-prices.ts';
+import { getSummaryPrice, lookupItemPrice, type PriceResult } from '@/services/backpack-prices.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
@@ -266,11 +266,18 @@ export async function storePricesForItems(
   }
 }
 
+export type ApprovalSummary = {
+  donorName: string | null;
+  itemCount: number;
+  totalValue: number | null;
+  totalCurrency: 'keys' | 'metal' | null;
+};
+
 export async function approveDonationOffer(
   ctx: SteamContext,
   tradeOfferId: string,
   reviewer: DonationReviewerInput
-): Promise<void> {
+): Promise<ApprovalSummary> {
   const pendingOffer = await findPendingDonationOffer(tradeOfferId);
   if (!pendingOffer) {
     throw new Error(`No pending donation offer found for trade offer ID ${tradeOfferId}`);
@@ -330,6 +337,20 @@ export async function approveDonationOffer(
 
   await markDonationApproved(pendingOffer, reviewer, prizeItems);
 
+  const priceResults = await Promise.all(
+    prizeItems.map((item) => lookupItemPrice(item.name).catch(() => null))
+  );
+  const validPrices = priceResults.filter((p): p is PriceResult => p !== null);
+
+  let totalValue: number | null = null;
+  let totalCurrency: 'keys' | 'metal' | null = null;
+  if (validPrices.length === prizeItems.length && validPrices.length > 0) {
+    const totalInMetal = validPrices.reduce((sum, p) => sum + p.valueInMetal, 0);
+    const summary = getSummaryPrice(totalInMetal);
+    totalValue = summary.value;
+    totalCurrency = summary.currency;
+  }
+
   void storePricesForItems(prizeItems.map((i) => ({ assetId: i.assetId, name: i.name })));
 
   const donorLinkApprove = steamProfileLink(
@@ -354,6 +375,13 @@ export async function approveDonationOffer(
     color: Colors.Green,
     fields: [{ name: `🎮 Items donados (${String(itemCount)})`, value: itemList }]
   });
+
+  return {
+    donorName: pendingOffer.donor_name,
+    itemCount,
+    totalValue,
+    totalCurrency,
+  };
 }
 
 export async function rejectDonationOffer(

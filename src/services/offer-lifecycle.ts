@@ -13,18 +13,7 @@ import { deletePrizePoolItemsByAssetIds } from '@/db/donations.ts';
 import { env } from '@/env.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
-
-function resolvePersonaName(ctx: SteamContext, steamId64: string): string {
-  const persona = (ctx.user.users as Record<string, unknown>)[steamId64] as
-    | Record<string, unknown>
-    | undefined;
-  if (!persona) return steamId64;
-  for (const key of ['player_name', 'persona_name', 'personaName', 'name']) {
-    const v = persona[key];
-    if (typeof v === 'string' && v.trim()) return v.trim();
-  }
-  return steamId64;
-}
+import { resolvePersonaName } from '@/utils/persona.ts';
 
 function getOffer(manager: SteamContext['tradeOfferManager'], id: string): Promise<TradeOffer> {
   return new Promise((resolve, reject) => {

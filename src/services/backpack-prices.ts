@@ -235,3 +235,11 @@ export async function warmPriceCache(): Promise<void> {
     // non-fatal on startup
   }
 }
+
+export function getSummaryPrice(totalInMetal: number): { value: number; currency: 'keys' | 'metal' } {
+  if (keyPriceInMetal > 0 && totalInMetal >= keyPriceInMetal) {
+    const keys = Math.round((totalInMetal / keyPriceInMetal) * 100) / 100;
+    return { value: keys, currency: 'keys' };
+  }
+  return { value: Math.round(totalInMetal * 100) / 100, currency: 'metal' };
+}
