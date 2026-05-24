@@ -154,7 +154,7 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
         `[trades] Admin withdrew ${String(tf2Given.length)} TF2 item(s); removed ${String(deletedCount)} prize pool row(s), cancelled ${String(cancelledDeliveries.length)} pending delivery(s).`
       );
       for (const delivery of cancelledDeliveries) {
-        const winnerLink = steamProfileLink(resolvePersonaName(ctx, delivery.winner_steam_id), delivery.winner_steam_id);
+        const winnerLink = steamProfileLink(await resolvePersonaName(ctx, delivery.winner_steam_id), delivery.winner_steam_id);
         void notify('admin', {
           title: '⚠️ Entrega cancelada — item retirado del inventario',
           description: `El item **${delivery.item_name}** fue retirado del inventario del bot por un admin antes de ser entregado. La entrega pendiente para ${winnerLink} ha sido cancelada.`,

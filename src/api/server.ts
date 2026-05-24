@@ -326,7 +326,7 @@ async function handleDeliveryRecord(
     triggerPrizeDelivery(ctx, steamId64);
   }
 
-  const winnerLabel = resolvePersonaName(ctx, steamId64);
+  const winnerLabel = await resolvePersonaNameAsync(ctx, steamId64);
   void notify('admin', {
     title: '🎉 Premio asignado',
     description: `**${steamProfileLink(winnerLabel, steamId64)}** ganó **${itemName.trim()}**.`,
@@ -427,7 +427,7 @@ async function handleAdminSend(
     triggerPrizeDelivery(ctx, winnerSteamId);
   }
 
-  const adminSendWinnerLabel = resolvePersonaName(ctx, winnerSteamId);
+  const adminSendWinnerLabel = await resolvePersonaName(ctx, winnerSteamId);
   void notify('admin', {
     title: 'Manual delivery queued',
     description: `${String(items.length)} item(s) queued for ${steamProfileLink(adminSendWinnerLabel, winnerSteamId)}. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
@@ -461,22 +461,20 @@ async function handleDeliveryActive(
     return;
   }
 
-  sendJson(
-    res,
-    200,
-    rows.map((row) => ({
+  const mapped = await Promise.all(
+    rows.map(async (row) => ({
       id: row.id,
       winnerSteamId: row.winner_steam_id,
-      winnerName: resolvePersonaName(ctx, row.winner_steam_id),
+      winnerName: await resolvePersonaName(ctx, row.winner_steam_id),
       assetId: row.asset_id,
       itemName: row.item_name,
       status: row.status,
       createdAt: row.created_at,
       expiresAt: row.expires_at,
       tradeOfferId: row.trade_offer_id
-    })),
-    req
+    }))
   );
+  sendJson(res, 200, mapped, req);
 }
 
 async function handleDeliveryRevoke(
@@ -552,7 +550,7 @@ async function handleDeliveryRevoke(
       sendJson(res, 500, { error: 'Se cancelo la entrega pero fallo la reasignacion' });
       return;
     }
-    newWinnerName = resolvePersonaName(ctx, targetSteamId);
+    newWinnerName = await resolvePersonaName(ctx, targetSteamId);
     const isFriend = ctx.user.myFriends[targetSteamId] === SteamUser.EFriendRelationship.Friend;
     if (isFriend) {
       triggerPrizeDelivery(ctx, targetSteamId);
@@ -564,7 +562,7 @@ async function handleDeliveryRevoke(
   const adminIdStr =
     typeof adminSteamId === 'string' && isValidSteamId64(adminSteamId) ? adminSteamId : null;
   const adminDisplay = adminIdStr ? steamProfileLink(adminLabel, adminIdStr) : adminLabel;
-  const prevWinnerLabel = resolvePersonaName(ctx, active.winner_steam_id);
+  const prevWinnerLabel = await resolvePersonaName(ctx, active.winner_steam_id);
 
   if (action === 'reassign' && typeof targetSteamId === 'string') {
     void notify('admin', {

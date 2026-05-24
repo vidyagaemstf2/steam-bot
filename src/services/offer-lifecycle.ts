@@ -75,7 +75,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
         );
       }
       const winnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
-      const winnerLabel = resolvePersonaName(ctx, winnerId);
+      const winnerLabel = await resolvePersonaName(ctx, winnerId);
       const deliveredItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       void notify('admin', {
         title: '✅ Premio entregado',
@@ -105,7 +105,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
 
     if (offer.state === S.Declined || offer.state === S.Countered) {
       const declinedWinnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
-      const declinedWinnerLabel = resolvePersonaName(ctx, declinedWinnerId);
+      const declinedWinnerLabel = await resolvePersonaName(ctx, declinedWinnerId);
       const declinedItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       const stateLabel = offer.state === S.Countered ? 'contrarrestada' : 'rechazada';
       console.log(
@@ -128,7 +128,7 @@ async function applyOutboundOfferStateFromSteam(ctx: SteamContext, offer: TradeO
       offer.state === S.CanceledBySecondFactor
     ) {
       const endedWinnerId = tracked[0]?.winner_steam_id ?? offer.partner.getSteamID64();
-      const endedWinnerLabel = resolvePersonaName(ctx, endedWinnerId);
+      const endedWinnerLabel = await resolvePersonaName(ctx, endedWinnerId);
       const endedItems = tracked.map((r) => `• ${r.item_name}`).join('\n') || '—';
       if (offer.state === S.InvalidItems) {
         console.error(
