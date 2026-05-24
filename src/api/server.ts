@@ -361,7 +361,7 @@ async function handleAdminSend(
     return;
   }
 
-  const { winnerSteamId, items } = body as Record<string, unknown>;
+  const { winnerSteamId, items, isGiveawayBundle } = body as Record<string, unknown>;
 
   if (typeof winnerSteamId !== 'string' || !isValidSteamId64(winnerSteamId)) {
     sendJson(res, 400, { error: 'winnerSteamId invalido' });
@@ -428,13 +428,16 @@ async function handleAdminSend(
   }
 
   const adminSendWinnerLabel = await resolvePersonaName(ctx, winnerSteamId);
+  const bundleGiveaway = isGiveawayBundle === true;
   void notify('admin', {
-    title: 'Manual delivery queued',
-    description: `${String(items.length)} item(s) queued for ${steamProfileLink(adminSendWinnerLabel, winnerSteamId)}. Expires ${expiresAt.toISOString().slice(0, 10)}.`,
-    color: Colors.Blue,
+    title: bundleGiveaway ? '🎉 Bundle ganado' : '📦 Entrega manual encolada',
+    description: bundleGiveaway
+      ? `**${steamProfileLink(adminSendWinnerLabel, winnerSteamId)}** ganó un bundle de **${String(items.length)} ítem(s)** en el sorteo.`
+      : `${String(items.length)} ítem(s) encolado(s) para ${steamProfileLink(adminSendWinnerLabel, winnerSteamId)}. Expira ${expiresAt.toISOString().slice(0, 10)}.`,
+    color: bundleGiveaway ? Colors.Green : Colors.Blue,
     fields: (items as Record<string, unknown>[]).map((it) => ({
-      name: (it.assetId as string).trim(),
-      value: (it.itemName as string).trim(),
+      name: (it.itemName as string).trim(),
+      value: (it.assetId as string).trim(),
       inline: true
     }))
   });
