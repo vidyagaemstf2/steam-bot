@@ -316,3 +316,41 @@ export async function cancelDeliveriesByIds(ids: number[]): Promise<void> {
     data: { status: 'cancelled', active_reservation_key: null, trade_offer_id: null }
   });
 }
+
+export type WithdrawCleanupResult = {
+  cancelledDeliveries: PendingDelivery[];
+  deletedPoolCount: number;
+};
+
+/**
+ * Atomically cancels any active deliveries and removes prize pool entries for the
+ * given asset IDs. Both operations are wrapped in a single transaction so a partial
+ * failure cannot leave the database in an inconsistent state.
+ */
+export async function cleanupWithdrawnItems(assetIds: string[]): Promise<WithdrawCleanupResult> {
+  if (assetIds.length === 0) return { cancelledDeliveries: [], deletedPoolCount: 0 };
+
+  const active = await prisma.pendingDelivery.findMany({
+    where: {
+      asset_id: { in: assetIds },
+      status: { in: [...RESERVED_STATUSES] }
+    }
+  });
+
+  const deletedPoolCount = await prisma.$transaction(async (tx) => {
+    if (active.length > 0) {
+      await tx.pendingDelivery.updateMany({
+        where: { id: { in: active.map((r) => r.id) } },
+        data: { status: 'cancelled', active_reservation_key: null }
+      });
+    }
+
+    const deleted = await tx.prizePoolItem.deleteMany({
+      where: { asset_id: { in: assetIds } }
+    });
+
+    return deleted.count;
+  });
+
+  return { cancelledDeliveries: active, deletedPoolCount };
+}

@@ -2,7 +2,6 @@ import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js'
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
   deletePendingDonationOffer,
-  deletePrizePoolItemsByAssetIds,
   findPendingDonationOffer,
   listPendingDonationOffers,
   markDonationRejectedByPolicy,
@@ -10,11 +9,12 @@ import {
 } from '@/db/donations.ts';
 import { isBotAdmin } from '@/env.ts';
 import { resolveExchangeAssetIds, storePricesForItems, tryRecordIncomingDonationOffer } from '@/services/donations.ts';
-import { cancelDeliveriesByAssetIds } from '@/db/pending-deliveries.ts';
+import { cleanupWithdrawnItems } from '@/db/pending-deliveries.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+import type { DiscordEmbedField } from '@/utils/discord.ts';
 import { resolvePersonaName } from '@/utils/persona.ts';
 
 function acceptOffer(offer: TradeOffer): Promise<string> {
@@ -148,23 +148,43 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
   if (tf2Given.length > 0) {
     const givenAssetIds = tf2Given.map((i) => i.assetid);
     try {
-      const cancelledDeliveries = await cancelDeliveriesByAssetIds(givenAssetIds);
-      const deletedCount = await deletePrizePoolItemsByAssetIds(givenAssetIds);
+      const adminName = await resolvePersonaName(ctx, steamId);
+      const { cancelledDeliveries, deletedPoolCount } = await cleanupWithdrawnItems(givenAssetIds);
       console.log(
-        `[trades] Admin withdrew ${String(tf2Given.length)} TF2 item(s); removed ${String(deletedCount)} prize pool row(s), cancelled ${String(cancelledDeliveries.length)} pending delivery(s).`
+        `[trades] Admin withdrew ${String(tf2Given.length)} TF2 item(s); removed ${String(deletedPoolCount)} prize pool row(s), cancelled ${String(cancelledDeliveries.length)} pending delivery(s).`
       );
-      for (const delivery of cancelledDeliveries) {
-        const winnerLink = steamProfileLink(await resolvePersonaName(ctx, delivery.winner_steam_id), delivery.winner_steam_id);
-        void notify('admin', {
-          title: '⚠️ Entrega cancelada — item retirado del inventario',
-          description: `El item **${delivery.item_name}** fue retirado del inventario del bot por un admin antes de ser entregado. La entrega pendiente para ${winnerLink} ha sido cancelada.`,
-          color: Colors.Yellow,
-          fields: [
-            { name: 'Asset ID', value: delivery.asset_id, inline: true },
-            { name: 'Estado anterior', value: delivery.status, inline: true }
-          ]
+
+      const itemLines = tf2Given
+        .map((i) => `• ${i.market_hash_name ?? i.market_name ?? i.name ?? 'Unknown'} (\`${i.assetid}\`)`)
+        .join('\n');
+
+      const embedFields: DiscordEmbedField[] = [
+        { name: 'Trade Offer', value: `#${offerId}`, inline: true },
+        {
+          name: `🎮 Ítems retirados (${String(tf2Given.length)})`,
+          value: itemLines.slice(0, 1024) || '—'
+        }
+      ];
+
+      if (cancelledDeliveries.length > 0) {
+        const deliveryLines = await Promise.all(
+          cancelledDeliveries.map(async (d) => {
+            const winnerName = await resolvePersonaName(ctx, d.winner_steam_id);
+            return `• **${d.item_name}** → ${steamProfileLink(winnerName, d.winner_steam_id)} (estado: ${d.status})`;
+          })
+        );
+        embedFields.push({
+          name: `⚠️ Entregas canceladas (${String(cancelledDeliveries.length)})`,
+          value: deliveryLines.join('\n').slice(0, 1024)
         });
       }
+
+      void notify('admin', {
+        title: '🚨 Admin retiró ítems del inventario',
+        description: `**${steamProfileLink(adminName, steamId)}** retiró **${String(tf2Given.length)} ítem(s)** del inventario del bot.`,
+        color: Colors.Red,
+        fields: embedFields
+      });
     } catch (err) {
       console.error(`[trades] Failed to clean up given items from DB:`, err);
     }
