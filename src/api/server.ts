@@ -11,6 +11,12 @@ import {
   listActiveDeliveries,
   listReservedAssetIds
 } from '@/db/pending-deliveries.ts';
+import {
+  getOverviewStats,
+  getTopDonors,
+  getTopWinners,
+  getPlayerStats
+} from '@/db/stats.ts';
 import { env } from '@/env.ts';
 import { triggerPrizeDelivery } from '@/services/delivery.ts';
 import { cancelTradeOfferIfActive } from '@/services/offer-lifecycle.ts';
@@ -660,9 +666,86 @@ async function handleDonationReview(
   }
 }
 
+async function handleStatsOverview(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  try {
+    const stats = await getOverviewStats();
+    sendJson(res, 200, stats, req);
+  } catch (err) {
+    console.error('[api] Stats overview error:', err);
+    sendJson(res, 500, { error: 'Error obteniendo estadísticas' });
+  }
+}
+
+async function handleStatsTopDonors(res: ServerResponse, req: IncomingMessage): Promise<void> {
+  try {
+    const donors = await getTopDonors();
+    sendJson(res, 200, donors, req);
+  } catch (err) {
+    console.error('[api] Stats top donors error:', err);
+    sendJson(res, 500, { error: 'Error obteniendo donantes' });
+  }
+}
+
+async function handleStatsTopWinners(
+  ctx: SteamContext,
+  res: ServerResponse,
+  req: IncomingMessage
+): Promise<void> {
+  try {
+    const winners = await getTopWinners();
+    const withNames = await Promise.all(
+      winners.map(async (w) => ({
+        ...w,
+        winnerName: await resolvePersonaName(ctx, w.winnerSteamId)
+      }))
+    );
+    sendJson(res, 200, withNames, req);
+  } catch (err) {
+    console.error('[api] Stats top winners error:', err);
+    sendJson(res, 500, { error: 'Error obteniendo ganadores' });
+  }
+}
+
+async function handleStatsPlayer(
+  res: ServerResponse,
+  req: IncomingMessage,
+  steamId64: string
+): Promise<void> {
+  try {
+    const stats = await getPlayerStats(steamId64);
+    sendJson(res, 200, stats, req);
+  } catch (err) {
+    console.error('[api] Stats player error:', err);
+    sendJson(res, 500, { error: 'Error obteniendo estadísticas del jugador' });
+  }
+}
+
+const STATS_PLAYER_RE = /^\/stats\/player\/(\d{17,19})$/;
+
 async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost');
   const pathname = url.pathname;
+
+  if (req.method === 'GET' && pathname === '/stats/overview') {
+    await handleStatsOverview(res, req);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/stats/top-donors') {
+    await handleStatsTopDonors(res, req);
+    return;
+  }
+
+  if (req.method === 'GET' && pathname === '/stats/top-winners') {
+    await handleStatsTopWinners(ctx, res, req);
+    return;
+  }
+
+  const statsPlayer = STATS_PLAYER_RE.exec(pathname);
+  if (req.method === 'GET' && statsPlayer) {
+    await handleStatsPlayer(res, req, statsPlayer[1]!);
+    return;
+  }
 
   const provided = getProvidedApiKey(req);
   if (provided === null || !apiKeysEqual(provided, env.API_SECRET)) {
@@ -757,7 +840,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       });
       apiServer = server;
       console.log(
-        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send, GET /delivery/active, POST /delivery/revoke`
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send, GET /delivery/active, POST /delivery/revoke, GET /stats/overview, GET /stats/top-donors, GET /stats/top-winners, GET /stats/player/:steamId64`
       );
       resolve();
     });
