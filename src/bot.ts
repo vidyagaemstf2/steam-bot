@@ -8,6 +8,7 @@ import {
 import { env } from '@/env.ts';
 import { registerClaimChat } from '@/services/claim-chat.ts';
 import { registerOutboundDelivery } from '@/services/delivery.ts';
+import { registerFriendActivity, runInactiveFriendSweep } from '@/services/friend-activity.ts';
 import { registerFriendGating } from '@/services/friends.ts';
 import { registerHelpChat } from '@/services/help-chat.ts';
 import {
@@ -95,6 +96,8 @@ export function startBot(): void {
       console.log(`[bot] API bind=${env.API_HOST}:${String(env.API_PORT)}`);
       console.log(`[bot] BOT_ADMINS count=${String(env.BOT_ADMINS.length)}`);
       console.log(`[bot] REMOVE_FRIEND_AFTER_DELIVERY=${String(env.REMOVE_FRIEND_AFTER_DELIVERY)}`);
+      console.log(`[bot] INACTIVE_FRIEND_PRUNE_DAYS=${String(env.INACTIVE_FRIEND_PRUNE_DAYS)}`);
+      console.log(`[bot] STEAM_FRIEND_LIMIT=${String(env.STEAM_FRIEND_LIMIT)} FRIEND_PRUNE_THRESHOLD_PCT=${String(env.FRIEND_PRUNE_THRESHOLD_PCT)}`);
       console.log(`[bot] DATABASE_URL (redacted)=${redactedDatabaseUrl(env.DATABASE_URL)}`);
 
       const steamCtx = await connectSteam();
@@ -108,6 +111,8 @@ export function startBot(): void {
       await reconcilePendingDonationsOnStartup(steamCtx);
       await runExpirySweep(steamCtx);
       setInterval(() => { void runExpirySweep(steamCtx); }, 60 * 60 * 1000);
+      registerFriendActivity(steamCtx);
+      setInterval(() => { void runInactiveFriendSweep(steamCtx); }, 60 * 60 * 1000);
       registerFriendGating(steamCtx);
       registerOutboundDelivery(steamCtx);
       registerHelpChat(steamCtx);

@@ -40,6 +40,18 @@ export const env = createEnv({
     DISCORD_WEBHOOK_DONATIONS: z.string().url().optional(),
     /** Days before an admin-initiated unclaimed delivery is auto-cancelled. */
     MANUAL_DELIVERY_EXPIRY_DAYS: z.coerce.number().int().min(1).default(7),
+    /**
+     * Friends with no interaction in this many days are automatically removed.
+     * Set to 0 to disable the sweep entirely.
+     */
+    INACTIVE_FRIEND_PRUNE_DAYS: z.coerce.number().int().min(0).default(30),
+    /** Steam friend list capacity for this account (base limit is 250). */
+    STEAM_FRIEND_LIMIT: z.coerce.number().int().min(1).default(250),
+    /**
+     * Percentage of `STEAM_FRIEND_LIMIT` at which the inactive-friend sweep activates.
+     * E.g. 80 means the sweep runs only when the friend list is at least 80 % full.
+     */
+    FRIEND_PRUNE_THRESHOLD_PCT: z.coerce.number().int().min(1).max(100).default(80),
     /** backpack.tf WebAPI key for item pricing (optional; pricing is skipped when absent). */
     BACKPACK_TF_API_KEY: z.string().min(1).optional()
   },
