@@ -11,11 +11,11 @@ import {
   type DonationReviewerInput,
   type PendingDonationOffer
 } from '@/db/donations.ts';
-import { getSummaryPrice, lookupItemPrice, type PriceResult } from '@/services/backpack-prices.ts';
+import { getSummaryPrice, lookupItemPrice } from '@/services/backpack-prices.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+import { Colors, notify, notifySplit, splitItemsIntoFields, steamProfileLink } from '@/utils/discord.ts';
 
 const DONATION_KEYWORDS = ['!donar', '!donate'];
 
@@ -337,21 +337,47 @@ export async function approveDonationOffer(
 
   await markDonationApproved(pendingOffer, reviewer, prizeItems);
 
+  // Fetch all prices in a single parallel pass.
   const priceResults = await Promise.all(
     prizeItems.map((item) => lookupItemPrice(item.name).catch(() => null))
   );
-  const validPrices = priceResults.filter((p): p is PriceResult => p !== null);
+
+  const pricedCount = priceResults.filter(Boolean).length;
+  console.log(`[donations] Priced ${String(pricedCount)}/${String(prizeItems.length)} item(s) for offer ${offerId}.`);
+
+  // Use whatever prices resolved — partial coverage is better than no total at all.
+  const totalInMetal = priceResults.reduce<number>(
+    (sum, p) => (p !== null ? sum + p.valueInMetal : sum),
+    0
+  );
 
   let totalValue: number | null = null;
   let totalCurrency: 'keys' | 'metal' | null = null;
-  if (validPrices.length === prizeItems.length && validPrices.length > 0) {
-    const totalInMetal = validPrices.reduce((sum, p) => sum + p.valueInMetal, 0);
+  if (pricedCount > 0) {
     const summary = getSummaryPrice(totalInMetal);
     totalValue = summary.value;
     totalCurrency = summary.currency;
   }
 
-  void storePricesForItems(prizeItems.map((i) => ({ assetId: i.assetId, name: i.name })));
+  // Persist prices directly from the results already in hand — no second lookup.
+  void (async () => {
+    for (let i = 0; i < prizeItems.length; i++) {
+      const price = priceResults[i];
+      if (!price) continue;
+      try {
+        await updatePrizePoolItemPrice(prizeItems[i].assetId, {
+          priceKeys: price.currency === 'keys' ? price.value : null,
+          priceMetal: price.currency === 'metal' ? price.value : null,
+          priceInMetal: price.valueInMetal
+        });
+      } catch (err) {
+        console.error(
+          `[donations] Failed to store price for ${prizeItems[i].assetId} (${prizeItems[i].name ?? ''}):`,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+  })();
 
   const donorLinkApprove = steamProfileLink(
     pendingOffer.donor_name ?? pendingOffer.donor_steam_id,
@@ -361,20 +387,21 @@ export async function approveDonationOffer(
     ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
     : (reviewer.reviewerName ?? 'admin');
   const itemCount = pendingOffer.items.length;
-  const itemList = pendingOffer.items.map((item) => `• ${item.name}`).join('\n') || '—';
+  const itemFields = splitItemsIntoFields(
+    pendingOffer.items.map((item) => item.name),
+    `🎮 Items donados (${String(itemCount)})`
+  );
 
-  void notify('donations', {
+  void notifySplit('donations', {
     title: '🎁 ¡Nueva donación recibida!',
     description: `¡Gracias **${donorLinkApprove}** por donar ${String(itemCount)} item(s) al pool de premios! Tu generosidad hace posibles los sorteos. 🙌`,
     color: Colors.Green,
-    fields: [{ name: `🎮 Items donados (${String(itemCount)})`, value: itemList }]
-  });
-  void notify('admin', {
+  }, itemFields);
+  void notifySplit('admin', {
     title: 'Donación aprobada',
     description: `Oferta de **${donorLinkApprove}** aprobada por ${reviewerLinkApprove}.`,
     color: Colors.Green,
-    fields: [{ name: `🎮 Items donados (${String(itemCount)})`, value: itemList }]
-  });
+  }, itemFields);
 
   return {
     donorName: pendingOffer.donor_name,

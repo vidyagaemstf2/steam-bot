@@ -13,7 +13,7 @@ import { cleanupWithdrawnItems } from '@/db/pending-deliveries.ts';
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+import { Colors, notify, notifySplit, splitItemsIntoFields, steamProfileLink } from '@/utils/discord.ts';
 import type { DiscordEmbedField } from '@/utils/discord.ts';
 import { resolvePersonaName } from '@/utils/persona.ts';
 
@@ -85,13 +85,15 @@ export async function handleIncomingOffer(offer: TradeOffer, ctx: SteamContext):
         recordedDonation.donor_name ?? recordedDonation.donor_steam_id,
         recordedDonation.donor_steam_id
       );
-      const itemList = recordedDonation.items.map((i) => `• ${i.name}`).join('\n') || '—';
-      void notify('admin', {
+      const itemFields = splitItemsIntoFields(
+        recordedDonation.items.map((i) => i.name),
+        `🎮 Items (${String(recordedDonation.items.length)})`
+      );
+      void notifySplit('admin', {
         title: '📬 Nueva oferta de donación pendiente',
         description: `**${donorLink}** envió una oferta de donación con ${String(recordedDonation.items.length)} item(s). Requiere aprobación.`,
         color: Colors.Blue,
-        fields: [{ name: `🎮 Items (${String(recordedDonation.items.length)})`, value: itemList }]
-      });
+      }, itemFields);
       return;
     }
   } catch (err) {
@@ -250,13 +252,11 @@ async function handleReceivedOfferChanged(offer: TradeOffer): Promise<void> {
     donation.donor_name ?? donation.donor_steam_id,
     donation.donor_steam_id
   );
-  const itemList = donation.items.map((i) => `• ${i.name}`).join('\n') || '—';
-  void notify('admin', {
+  void notifySplit('admin', {
     title: '❌ Donación cancelada por el donante',
     description: `**${donorLink}** canceló su oferta de donación antes de ser aprobada. Eliminada de la base de datos.`,
     color: Colors.Red,
-    fields: [{ name: `🎮 Items (${String(donation.items.length)})`, value: itemList }]
-  });
+  }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
 }
 
 export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Promise<void> {
@@ -288,13 +288,11 @@ export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Pro
         donation.donor_name ?? donation.donor_steam_id,
         donation.donor_steam_id
       );
-      const itemList = donation.items.map((i) => `• ${i.name}`).join('\n') || '—';
-      void notify('admin', {
+      void notifySplit('admin', {
         title: '❌ Donación cancelada por el donante',
         description: `**${donorLink}** canceló su oferta de donación antes de ser aprobada. Eliminada de la base de datos.`,
         color: Colors.Red,
-        fields: [{ name: `🎮 Items (${String(donation.items.length)})`, value: itemList }]
-      });
+      }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
     } catch (err) {
       console.error(
         `[reconcile-donations] getOffer failed for ${donation.trade_offer_id}; leaving DB unchanged:`,
