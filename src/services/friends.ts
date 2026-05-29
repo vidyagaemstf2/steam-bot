@@ -29,6 +29,7 @@ function pollPendingIncomingFriendRequestsFromList(user: SteamUser): void {
   );
 
   if (pending.length === 0) {
+    console.log('[friends] No pending incoming friend requests.');
     return;
   }
 
