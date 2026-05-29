@@ -33,14 +33,28 @@ export type DeliveryAttemptResult =
   | { ok: true; code: 'no_pending'; message: string }
   | { ok: false; code: DeliveryFailureCode; message: string };
 
+let inventoryInFlight: Promise<OfferItem[]> | null = null;
+
 async function loadBotTf2Inventory(ctx: SteamContext): Promise<OfferItem[]> {
   const sid = ctx.user.steamID;
   if (!sid) {
     throw new Error('Steam user has no steamID yet');
   }
 
-  const merged = await loadTf2InventoryViaCommunity(ctx.community, sid.getSteamID64());
-  return merged as OfferItem[];
+  if (inventoryInFlight) {
+    return inventoryInFlight;
+  }
+
+  inventoryInFlight = (async () => {
+    try {
+      const merged = await loadTf2InventoryViaCommunity(ctx.community, sid.getSteamID64());
+      return merged as OfferItem[];
+    } finally {
+      inventoryInFlight = null;
+    }
+  })();
+
+  return inventoryInFlight;
 }
 
 function sendOffer(offer: TradeOffer): Promise<'pending' | 'sent'> {
