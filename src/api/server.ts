@@ -332,7 +332,7 @@ async function handleDeliveryRecord(
     triggerPrizeDelivery(ctx, steamId64);
   }
 
-  const winnerLabel = await resolvePersonaNameAsync(ctx, steamId64);
+  const winnerLabel = await resolvePersonaName(ctx, steamId64);
   void notify('admin', {
     title: '🎉 Premio asignado',
     description: `**${steamProfileLink(winnerLabel, steamId64)}** ganó **${itemName.trim()}**.`,
