@@ -15,7 +15,7 @@ import { getSummaryPrice, lookupItemPrice } from '@/services/backpack-prices.ts'
 import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
 import { TF2_APP_ID } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
-import { Colors, notify, notifySplit, splitItemsIntoFields, steamProfileLink } from '@/utils/discord.ts';
+import { Colors, notifySplit, splitItemsIntoFields, steamProfileLink } from '@/utils/discord.ts';
 
 const DONATION_KEYWORDS = ['!donar', '!donate'];
 
@@ -443,9 +443,14 @@ export async function rejectDonationOffer(
   const reviewerLinkReject = reviewer.reviewerSteamId
     ? steamProfileLink(reviewer.reviewerName ?? reviewer.reviewerSteamId, reviewer.reviewerSteamId)
     : (reviewer.reviewerName ?? 'admin');
-  void notify('admin', {
+  const rejectedItemCount = pendingOffer.items.length;
+  const rejectedItemFields = splitItemsIntoFields(
+    pendingOffer.items.map((item) => item.name),
+    `🎮 Items rechazados (${String(rejectedItemCount)})`
+  );
+  void notifySplit('admin', {
     title: 'Donación rechazada',
     description: `Oferta de **${donorLinkReject}** rechazada por ${reviewerLinkReject}.`,
     color: Colors.Red
-  });
+  }, rejectedItemFields);
 }

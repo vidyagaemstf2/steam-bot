@@ -23,23 +23,39 @@ import {
 import { connectSteam, getSteamContext, shutdownSteam } from '@/steam/session.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+import { resolvePersonaName } from '@/utils/persona.ts';
 
 export { prisma, getSteamContext, shutdownSteam };
+
+async function resolveWinnerNames(
+  ctx: SteamContext,
+  rows: { winner_steam_id: string }[]
+): Promise<Map<string, string>> {
+  const uniqueIds = [...new Set(rows.map((r) => r.winner_steam_id))];
+  const entries = await Promise.all(
+    uniqueIds.map(async (id) => [id, await resolvePersonaName(ctx, id)] as const)
+  );
+  return new Map(entries);
+}
 
 async function runExpirySweep(ctx: SteamContext): Promise<void> {
   try {
     const cancelled = await cancelExpiredDeliveries();
     if (cancelled.length > 0) {
       console.log(`[bot] Expired ${String(cancelled.length)} unclaimed delivery row(s).`);
+      const nameMap = await resolveWinnerNames(ctx, cancelled);
       void notify('admin', {
         title: 'Unclaimed deliveries expired',
         description: `${String(cancelled.length)} delivery row(s) were auto-cancelled due to expiry.`,
         color: Colors.Yellow,
-        fields: cancelled.map((r) => ({
-          name: r.item_name,
-          value: steamProfileLink(r.winner_steam_id, r.winner_steam_id),
-          inline: true
-        }))
+        fields: cancelled.map((r) => {
+          const personaName = nameMap.get(r.winner_steam_id) ?? r.winner_steam_id;
+          return {
+            name: r.item_name,
+            value: `${steamProfileLink(personaName, r.winner_steam_id)}\n${r.winner_steam_id}`,
+            inline: true
+          };
+        })
       });
     }
   } catch (err) {
@@ -58,15 +74,19 @@ async function runExpirySweep(ctx: SteamContext): Promise<void> {
     }
     await cancelDeliveriesByIds(stale.map((r) => r.id));
     console.log(`[bot] Cancelled ${String(stale.length)} stale offer_sent row(s).`);
+    const staleNameMap = await resolveWinnerNames(ctx, stale);
     void notify('admin', {
       title: '⏰ Ofertas de premio vencidas canceladas',
       description: `${String(stale.length)} oferta(s) en estado offer_sent fueron canceladas por expiración. Los items fueron devueltos al pool.`,
       color: Colors.Yellow,
-      fields: stale.map((r) => ({
-        name: r.item_name,
-        value: steamProfileLink(r.winner_steam_id, r.winner_steam_id),
-        inline: true
-      }))
+      fields: stale.map((r) => {
+        const personaName = staleNameMap.get(r.winner_steam_id) ?? r.winner_steam_id;
+        return {
+          name: r.item_name,
+          value: `${steamProfileLink(personaName, r.winner_steam_id)}\n${r.winner_steam_id}`,
+          inline: true
+        };
+      })
     });
   } catch (err) {
     console.error('[bot] Offer-sent expiry sweep failed:', err);
