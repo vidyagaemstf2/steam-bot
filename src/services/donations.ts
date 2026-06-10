@@ -1,6 +1,7 @@
 import type TradeOffer from 'steam-tradeoffer-manager/lib/classes/TradeOffer.js';
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import {
+  deletePendingDonationOffer,
   findPendingDonationOffer,
   markDonationAcceptedFailed,
   markDonationApproved,
@@ -299,7 +300,7 @@ export async function approveDonationOffer(
   const S = TradeOfferManager.ETradeOfferState;
   if (steamOffer.state !== S.Active) {
     const reason = `Trade offer is not active (state: ${String(steamOffer.state)})`;
-    await markDonationAcceptedFailed(tradeOfferId, reviewer, reason);
+    await deletePendingDonationOffer(tradeOfferId);
     throw new Error(reason);
   }
 

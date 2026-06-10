@@ -222,6 +222,7 @@ async function handleReceivedOfferChanged(offer: TradeOffer): Promise<void> {
 
   const isCancelledState =
     offer.state === S.Canceled ||
+    offer.state === S.Declined ||
     offer.state === S.Expired ||
     offer.state === S.InvalidItems ||
     offer.state === S.CanceledBySecondFactor;
@@ -258,6 +259,20 @@ async function handleReceivedOfferChanged(offer: TradeOffer): Promise<void> {
     description: `**${donorLink}** canceló su oferta de donación antes de ser aprobada. Eliminada de la base de datos.`,
     color: Colors.Red,
   }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
+}
+
+function describeOfferState(state: number): string {
+  const S = TradeOfferManager.ETradeOfferState;
+  switch (state) {
+    case S.Accepted: return 'aceptada en Steam (sin registro confirmado en pool)';
+    case S.Countered: return 'contrarrestada';
+    case S.Expired: return 'expirada';
+    case S.Canceled: return 'cancelada por el donante';
+    case S.Declined: return 'rechazada';
+    case S.InvalidItems: return 'cancelada automáticamente (items no disponibles)';
+    case S.CanceledBySecondFactor: return 'cancelada por confirmación 2FA';
+    default: return `estado desconocido (${String(state)})`;
+  }
 }
 
 export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Promise<void> {
@@ -302,18 +317,29 @@ export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Pro
       const deleted = await deletePendingDonationOffer(donation.trade_offer_id);
       if (!deleted) continue;
 
+      const stateDescription = describeOfferState(steamOffer.state);
       console.log(
-        `[reconcile-donations] Donation offer ${donation.trade_offer_id} was not Active (state=${String(steamOffer.state)}); removed from DB`
+        `[reconcile-donations] Donation offer ${donation.trade_offer_id} was not Active (state=${String(steamOffer.state)}: ${stateDescription}); removed from DB`
       );
 
       const donorLink = steamProfileLink(
         donation.donor_name ?? donation.donor_steam_id,
         donation.donor_steam_id
       );
+
+      const isAccepted = steamOffer.state === TradeOfferManager.ETradeOfferState.Accepted;
+      if (isAccepted) {
+        console.warn(
+          `[reconcile-donations] Offer ${donation.trade_offer_id} is Accepted on Steam but had no approved DB record — items may be in inventory without prize_pool_items tracking`
+        );
+      }
+
       void notifySplit('admin', {
-        title: '❌ Donación cancelada por el donante',
-        description: `**${donorLink}** canceló su oferta de donación antes de ser aprobada. Eliminada de la base de datos.`,
-        color: Colors.Red,
+        title: isAccepted ? '⚠️ Donación aceptada sin registro' : '❌ Donación no completada',
+        description: isAccepted
+          ? `La oferta de **${donorLink}** figura como aceptada en Steam pero no tiene registro aprobado en la base de datos. Los items pueden estar en el inventario sin seguimiento.`
+          : `La oferta de **${donorLink}** fue eliminada de la base de datos (${stateDescription}).`,
+        color: isAccepted ? Colors.Yellow : Colors.Red,
       }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
     } catch (err) {
       console.error(

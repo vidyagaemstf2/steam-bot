@@ -128,8 +128,8 @@ export async function markDonationAcceptedFailed(
   reviewer: DonationReviewerInput,
   reason: string
 ): Promise<void> {
-  await prisma.donationOffer.update({
-    where: { trade_offer_id: tradeOfferId },
+  await prisma.donationOffer.updateMany({
+    where: { trade_offer_id: tradeOfferId, status: { not: 'approved' } },
     data: {
       status: 'accepted_failed',
       reviewed_by_id: reviewer.reviewerSteamId,
@@ -161,7 +161,7 @@ export async function markDonationRejectedByPolicy(
   reason: string
 ): Promise<void> {
   await prisma.donationOffer.updateMany({
-    where: { trade_offer_id: tradeOfferId, status: 'pending_review' },
+    where: { trade_offer_id: tradeOfferId, status: { in: ['pending_review', 'accepted_failed'] } },
     data: {
       status: 'rejected',
       review_note: reason,
@@ -221,7 +221,7 @@ export async function markDonationApproved(
 
 export async function deletePendingDonationOffer(tradeOfferId: string): Promise<boolean> {
   const result = await prisma.donationOffer.deleteMany({
-    where: { trade_offer_id: tradeOfferId, status: 'pending_review' }
+    where: { trade_offer_id: tradeOfferId, status: { in: ['pending_review', 'accepted_failed'] } }
   });
   return result.count > 0;
 }
