@@ -3,7 +3,11 @@ import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { gzipSync } from 'node:zlib';
 import SteamUser from 'steam-user';
-import { listPendingDonationOffers, listPrizePoolItemsByAssetIds } from '@/db/donations.ts';
+import {
+  listPendingDonationOffers,
+  listPrizePoolItemsByAssetIds,
+  requeueFailedDonationOffer
+} from '@/db/donations.ts';
 import {
   cancelDeliveriesByAssetIds,
   createPendingDelivery,
@@ -610,6 +614,8 @@ async function handlePendingDonations(res: ServerResponse, req: IncomingMessage)
         donorName: offer.donor_name,
         message: offer.message,
         createdAt: offer.created_at,
+        acceptFailed: offer.acceptFailed,
+        failureReason: offer.failureReason,
         items: offer.items.map((item) => ({
           assetId: item.asset_id,
           name: item.name,
@@ -623,6 +629,27 @@ async function handlePendingDonations(res: ServerResponse, req: IncomingMessage)
   } catch (err) {
     console.error('[api] Failed to list pending donations:', err);
     sendJson(res, 500, { error: 'No se pudieron listar las donaciones pendientes' });
+  }
+}
+
+async function handleDonationRequeue(
+  req: IncomingMessage,
+  res: ServerResponse,
+  tradeOfferId: string
+): Promise<void> {
+  try {
+    const requeued = await requeueFailedDonationOffer(tradeOfferId);
+    if (!requeued) {
+      sendJson(res, 404, {
+        error: `No se encontró una donación con estado accepted_failed para el trade offer ${tradeOfferId}`
+      });
+      return;
+    }
+    console.log(`[api] Donation offer ${tradeOfferId} requeued to pending_review`);
+    sendJson(res, 200, { ok: true, requeued: true });
+  } catch (err) {
+    console.error('[api] Failed to requeue donation:', err);
+    sendJson(res, 500, { error: 'No se pudo reencolar la donación' });
   }
 }
 
@@ -807,6 +834,17 @@ async function handleRequest(ctx: SteamContext, req: IncomingMessage, res: Serve
     return;
   }
 
+  const donationRequeue = pathname.match(/^\/donations\/([^/]+)\/requeue$/);
+  if (req.method === 'POST' && donationRequeue) {
+    const tradeOfferId = decodeURIComponent(donationRequeue[1] ?? '');
+    if (!tradeOfferId) {
+      sendJson(res, 400, { error: 'Falta tradeOfferId' });
+      return;
+    }
+    await handleDonationRequeue(req, res, tradeOfferId);
+    return;
+  }
+
   sendJson(res, 404, { error: 'No encontrado' });
 }
 
@@ -840,7 +878,7 @@ export function startApiServer(ctx: SteamContext): Promise<void> {
       });
       apiServer = server;
       console.log(
-        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send, GET /delivery/active, POST /delivery/revoke, GET /stats/overview, GET /stats/top-donors, GET /stats/top-winners, GET /stats/player/:steamId64`
+        `[api] Listening on http://${env.API_HOST}:${String(env.API_PORT)} — GET /inventory, GET /friend-status/:steamId64, POST /delivery/trigger, POST /delivery/record, POST /delivery/admin-send, GET /delivery/active, POST /delivery/revoke, GET /donations/pending, POST /donations/:id/approve, POST /donations/:id/reject, POST /donations/:id/requeue, GET /stats/overview, GET /stats/top-donors, GET /stats/top-winners, GET /stats/player/:steamId64`
       );
       resolve();
     });

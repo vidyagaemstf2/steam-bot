@@ -78,6 +78,7 @@ Auth: `X-Bot-Secret` header or `Authorization: Bearer <token>` (compared via `AP
 | GET | `/donations/pending` | List donation offers with status `pending_review` |
 | POST | `/donations/:tradeOfferId/approve` | `{ reviewerSteamId?, reviewerName?, note? }` |
 | POST | `/donations/:tradeOfferId/reject` | `{ reviewerSteamId?, reviewerName?, note? }` |
+| POST | `/donations/:tradeOfferId/requeue` | Reset a stuck `accepted_failed` offer back to `pending_review` |
 
 ## Environment variables (src/env.ts)
 

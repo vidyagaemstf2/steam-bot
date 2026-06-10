@@ -41,6 +41,20 @@ export async function recordDonationOffer(input: {
     include: { items: true }
   });
   if (existing) {
+    if (existing.status === 'accepted_failed') {
+      return prisma.donationOffer.update({
+        where: { trade_offer_id: input.tradeOfferId },
+        data: {
+          status: 'pending_review',
+          reviewed_by_id: null,
+          reviewed_by_name: null,
+          review_note: null,
+          reviewed_at: null,
+          accepted_at: null
+        },
+        include: { items: true }
+      });
+    }
     return existing;
   }
 
@@ -67,21 +81,46 @@ export async function recordDonationOffer(input: {
   });
 }
 
-export async function listPendingDonationOffers(): Promise<PendingDonationOffer[]> {
-  return prisma.donationOffer.findMany({
-    where: { status: 'pending_review' },
+export type PendingDonationOfferWithMeta = PendingDonationOffer & {
+  acceptFailed: boolean;
+  failureReason: string | null;
+};
+
+export async function listPendingDonationOffers(): Promise<PendingDonationOfferWithMeta[]> {
+  const rows = await prisma.donationOffer.findMany({
+    where: { status: { in: ['pending_review', 'accepted_failed'] } },
     include: { items: true },
     orderBy: { created_at: 'asc' }
   });
+  return rows.map((row) => ({
+    ...row,
+    acceptFailed: row.status === 'accepted_failed',
+    failureReason: row.status === 'accepted_failed' ? (row.review_note ?? null) : null
+  }));
 }
 
 export async function findPendingDonationOffer(
   tradeOfferId: string
 ): Promise<PendingDonationOffer | null> {
   return prisma.donationOffer.findFirst({
-    where: { trade_offer_id: tradeOfferId, status: 'pending_review' },
+    where: { trade_offer_id: tradeOfferId, status: { in: ['pending_review', 'accepted_failed'] } },
     include: { items: true }
   });
+}
+
+export async function requeueFailedDonationOffer(tradeOfferId: string): Promise<boolean> {
+  const result = await prisma.donationOffer.updateMany({
+    where: { trade_offer_id: tradeOfferId, status: 'accepted_failed' },
+    data: {
+      status: 'pending_review',
+      reviewed_by_id: null,
+      reviewed_by_name: null,
+      review_note: null,
+      reviewed_at: null,
+      accepted_at: null
+    }
+  });
+  return result.count > 0;
 }
 
 export async function markDonationAcceptedFailed(

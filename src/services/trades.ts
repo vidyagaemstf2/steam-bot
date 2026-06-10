@@ -5,6 +5,7 @@ import {
   findPendingDonationOffer,
   listPendingDonationOffers,
   markDonationRejectedByPolicy,
+  requeueFailedDonationOffer,
   upsertPrizePoolItemDirect
 } from '@/db/donations.ts';
 import { isBotAdmin } from '@/env.ts';
@@ -275,7 +276,28 @@ export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Pro
   for (const donation of rows) {
     try {
       const steamOffer = await getOffer(ctx.tradeOfferManager, donation.trade_offer_id);
-      if (steamOffer.state === S.Active) continue;
+
+      if (steamOffer.state === S.Active) {
+        if (donation.acceptFailed) {
+          const requeued = await requeueFailedDonationOffer(donation.trade_offer_id);
+          if (requeued) {
+            console.log(
+              `[reconcile-donations] Donation offer ${donation.trade_offer_id} was accepted_failed but Steam offer is still Active; requeued to pending_review`
+            );
+            const donorLinkRequeue = steamProfileLink(
+              donation.donor_name ?? donation.donor_steam_id,
+              donation.donor_steam_id
+            );
+            void notifySplit('admin', {
+              title: '🔁 Donación pendiente recuperada',
+              description: `La oferta de **${donorLinkRequeue}** había fallado durante la aprobación pero sigue activa en Steam. Fue restaurada a pendiente de revisión.`,
+              color: Colors.Yellow,
+              fields: [{ name: 'Razón del fallo anterior', value: donation.failureReason ?? '(desconocida)', inline: false }],
+            }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
+          }
+        }
+        continue;
+      }
 
       const deleted = await deletePendingDonationOffer(donation.trade_offer_id);
       if (!deleted) continue;
