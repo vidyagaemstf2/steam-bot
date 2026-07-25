@@ -363,17 +363,18 @@ export async function approveDonationOffer(
   // Persist prices directly from the results already in hand — no second lookup.
   void (async () => {
     for (let i = 0; i < prizeItems.length; i++) {
+      const prizeItem = prizeItems[i];
       const price = priceResults[i];
-      if (!price) continue;
+      if (!prizeItem || !price) continue;
       try {
-        await updatePrizePoolItemPrice(prizeItems[i].assetId, {
+        await updatePrizePoolItemPrice(prizeItem.assetId, {
           priceKeys: price.currency === 'keys' ? price.value : null,
           priceMetal: price.currency === 'metal' ? price.value : null,
           priceInMetal: price.valueInMetal
         });
       } catch (err) {
         console.error(
-          `[donations] Failed to store price for ${prizeItems[i].assetId} (${prizeItems[i].name ?? ''}):`,
+          `[donations] Failed to store price for ${prizeItem.assetId} (${prizeItem.name ?? ''}):`,
           err instanceof Error ? err.message : String(err)
         );
       }

@@ -5,10 +5,13 @@ import {
   markRowsDeliveryAttemptFailed,
   markRowsOfferSent
 } from '@/db/pending-deliveries.ts';
-import { confirmTradeOfferWithRetries } from '@/steam/confirm.ts';
+import { cancelTradeOfferIfActive } from '@/services/offer-lifecycle.ts';
+import { confirmTradeOfferWithRetries, isSteamRateLimitError } from '@/steam/confirm.ts';
 import type { SteamContext } from '@/steam/session.ts';
 import { loadTf2InventoryViaCommunity } from '@/steam/tf2-inventory.ts';
 import { Colors, notify, steamProfileLink } from '@/utils/discord.ts';
+
+const CONFIRMATION_RETRY_COOLDOWN_MS = 60_000;
 
 type OfferItem = Parameters<TradeOffer['addMyItem']>[0];
 type DeliveryFailureCode =
@@ -162,6 +165,26 @@ async function failRows(
   return { ok: false, code: failure.code, message: failure.message };
 }
 
+function confirmationCooldownRemainingMs(rows: { last_failure_code: string | null; last_attempt_at: Date | null }[]): number {
+  let latestAttempt = 0;
+  let hasConfirmFailure = false;
+  for (const row of rows) {
+    if (row.last_failure_code !== 'confirmation_failed') {
+      continue;
+    }
+    hasConfirmFailure = true;
+    const at = row.last_attempt_at?.getTime() ?? 0;
+    if (at > latestAttempt) {
+      latestAttempt = at;
+    }
+  }
+  if (!hasConfirmFailure || latestAttempt <= 0) {
+    return 0;
+  }
+  const elapsed = Date.now() - latestAttempt;
+  return Math.max(0, CONFIRMATION_RETRY_COOLDOWN_MS - elapsed);
+}
+
 async function attemptDeliverPrizes(
   ctx: SteamContext,
   partnerId64: string
@@ -175,6 +198,19 @@ async function attemptDeliverPrizes(
     };
   }
   const rowIds = rows.map((r) => r.id);
+
+  const cooldownMs = confirmationCooldownRemainingMs(rows);
+  if (cooldownMs > 0) {
+    const waitSec = Math.ceil(cooldownMs / 1000);
+    console.log(
+      `[delivery] Cooldown after confirmation failure for ${partnerId64}; retry in ${String(waitSec)}s`
+    );
+    return {
+      ok: false,
+      code: 'confirmation_failed',
+      message: `Steam esta limitando las confirmaciones del bot. Proba reclamar de nuevo en unos ${String(waitSec)} segundos.`
+    };
+  }
 
   console.log(`[delivery] Pending deliveries for ${partnerId64}: ${String(rows.length)} row(s)`);
 
@@ -293,24 +329,34 @@ async function attemptDeliverPrizes(
       console.log(`[delivery] Offer ${idStr} confirmed via STEAM_IDENTITY_SECRET`);
     } catch (err) {
       console.error(`[delivery] Failed to confirm offer ${idStr}:`, err);
+      try {
+        await cancelTradeOfferIfActive(ctx.tradeOfferManager, idStr);
+        console.log(`[delivery] Cancelled unconfirmed offer ${idStr} after confirmation failure`);
+      } catch (cancelErr) {
+        console.error(`[delivery] Failed to cancel unconfirmed offer ${idStr}:`, cancelErr);
+      }
+      const rateLimited = isSteamRateLimitError(err);
       const winnerLabelConf = resolvePersonaName(ctx, partnerId64);
       const confItems = rows
         .filter((r) => deliverableRowIds.includes(r.id))
         .map((r) => `• ${r.item_name}`)
         .join('\n') || '—';
       void notify('admin', {
-        title: '❌ Confirmación móvil fallida',
-        description: `La oferta a **${steamProfileLink(winnerLabelConf, partnerId64)}** fue creada pero la confirmación móvil falló. El bot necesita atención.`,
+        title: rateLimited ? '⏳ Confirmación móvil rate-limited' : '❌ Confirmación móvil fallida',
+        description: rateLimited
+          ? `La oferta a **${steamProfileLink(winnerLabelConf, partnerId64)}** se creó pero Steam rate-limiteó la confirmación (429). La oferta fue cancelada; el ganador puede reintentar tras el cooldown.`
+          : `La oferta a **${steamProfileLink(winnerLabelConf, partnerId64)}** fue creada pero la confirmación móvil falló. La oferta fue cancelada.`,
         color: Colors.Red,
         fields: [
           { name: 'Items', value: confItems },
           { name: 'Error', value: err instanceof Error ? err.message : String(err) },
         ],
       });
-      return await failRows(rowIds, {
+      return await failRows(deliverableRowIds, {
         code: 'confirmation_failed',
-        message:
-          'Pude crear la oferta, pero fallo la confirmacion movil del bot. Esto necesita que un admin revise el bot.'
+        message: rateLimited
+          ? 'Steam esta limitando las confirmaciones del bot ahora mismo. Proba reclamar de nuevo en un minuto.'
+          : 'Pude crear la oferta, pero fallo la confirmacion movil del bot. Proba reclamar de nuevo en un minuto; si se repite, avisale a un admin.'
       });
     }
   }

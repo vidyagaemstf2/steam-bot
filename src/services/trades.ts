@@ -307,8 +307,17 @@ export async function reconcilePendingDonationsOnStartup(ctx: SteamContext): Pro
               title: '🔁 Donación pendiente recuperada',
               description: `La oferta de **${donorLinkRequeue}** había fallado durante la aprobación pero sigue activa en Steam. Fue restaurada a pendiente de revisión.`,
               color: Colors.Yellow,
-              fields: [{ name: 'Razón del fallo anterior', value: donation.failureReason ?? '(desconocida)', inline: false }],
-            }, splitItemsIntoFields(donation.items.map((i) => i.name), `🎮 Items (${String(donation.items.length)})`));
+            }, [
+              {
+                name: 'Razón del fallo anterior',
+                value: donation.failureReason ?? '(desconocida)',
+                inline: false
+              },
+              ...splitItemsIntoFields(
+                donation.items.map((i) => i.name),
+                `🎮 Items (${String(donation.items.length)})`
+              )
+            ]);
           }
         }
         continue;

@@ -633,7 +633,7 @@ async function handlePendingDonations(res: ServerResponse, req: IncomingMessage)
 }
 
 async function handleDonationRequeue(
-  req: IncomingMessage,
+  _req: IncomingMessage,
   res: ServerResponse,
   tradeOfferId: string
 ): Promise<void> {
